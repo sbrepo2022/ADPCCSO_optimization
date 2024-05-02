@@ -19,11 +19,13 @@
 
 #include "agents_initializer.h"
 #include "chicken_swarm.h"
+#include "fish_swarm.h"
 #include "helpers.h"
 #include "agent.h"
 #include "rootster.h"
 #include "hen.h"
 #include "chick.h"
+#include "fish.h"
 
 
 struct RunResult
@@ -47,7 +49,14 @@ enum class GraphMode
 std::map<std::string, std::shared_ptr<FitnessFunction>> initFitnessFunctions();
 cxxopts::ParseResult parseOptions(int argc, char *argv[], const std::map<std::string, std::shared_ptr<FitnessFunction>> &fitness_functions);
 void printHelp(const cxxopts::Options &options);
+
 RunResult run(size_t ndim, const std::shared_ptr<FitnessFunction> &fitness_function);
+void swarmsExchange(
+    const std::shared_ptr<ChickenSwarm> &chicken_swarm,
+    const std::shared_ptr<FishSwarm> &fish_swarm,
+    size_t num_agents_for_exchange
+);
+
 void saveResultX(const std::vector<RunResult> &run_results);
 void printRunStatistics(const std::vector<RunResult> &run_results);
 void draw2DGraphic(const std::vector<RunResult> &run_results, const std::shared_ptr<FitnessFunction> &fitness_function);
@@ -177,12 +186,22 @@ int main(int argc, char *argv[]) {
 
 RunResult run(size_t ndim, const std::shared_ptr<FitnessFunction> &fitness_function)
 {
+    // Общие параметры
     size_t num_agents = 200;
+    size_t num_agents_for_exchange = 20;
+    size_t num_chicken_agents = num_agents / 2;
+    size_t num_fish_agents = num_agents / 2;
+
+    // Параметры куриного роя
     double rootsters_coef = 0.2;
     double hens_coef = 0.6;
     size_t max_gen = 1000;
     double learn_factor_min = 0.4;
     double learn_factor_max = 0.9;
+
+    // Параметры роя рыб
+    double fish_step = 0.3;
+    double fish_visual = 2.5;
 
     auto hypercube = fitness_function->getBoundHypercube();
 
@@ -192,23 +211,23 @@ RunResult run(size_t ndim, const std::shared_ptr<FitnessFunction> &fitness_funct
     fitness_function->setBCoef(b_coef);
     fitness_function->setDCoef(d_coef);
 
-    std::vector<Eigen::VectorXd> X = AgentInitializer::hypercubeUniformInitializer(hypercube, num_agents);
+    // Инициализация куриного роя
+    std::vector<Eigen::VectorXd> X_chicken = AgentInitializer::hypercubeUniformInitializer(hypercube, num_chicken_agents);
     auto chicken_swarm = std::make_shared<ChickenSwarm>(
         fitness_function,
-        rootsters_coef * num_agents,
-        hens_coef * num_agents,
-        num_agents - rootsters_coef * num_agents - hens_coef * num_agents,
+        rootsters_coef * num_chicken_agents,
+        hens_coef * num_chicken_agents,
+        num_chicken_agents - rootsters_coef * num_chicken_agents - hens_coef * num_chicken_agents,
         max_gen,
         learn_factor_min,
         learn_factor_max
     );
-    chicken_swarm->startupAgentsInit(X);
+    chicken_swarm->startupAgentsInit(X_chicken);
 
-    // Проверка инициализации
-    // for (auto& agent : chicken_swarm->getAgents())
-    // {
-    //     std::cout << "Agent [" << agent->getAgentIndex() <<  "] has type <" << agent->getAgentType() << ">" << std::endl;
-    // }
+    // Инициализация роя рыб
+    std::vector<Eigen::VectorXd> X_fish = AgentInitializer::hypercubeUniformInitializer(hypercube, num_fish_agents);
+    auto fish_swarm = std::make_shared<FishSwarm>(fitness_function, fish_step, fish_visual);
+    fish_swarm->startupAgentsInit(X_fish);
 
     // Алгоритм локализации минимума
     auto calc_sync_gen = [](size_t t) -> size_t
@@ -221,7 +240,16 @@ RunResult run(size_t ndim, const std::shared_ptr<FitnessFunction> &fitness_funct
     for (size_t cur_gen = 1; cur_gen < max_gen; cur_gen++)
     {
         sync_gen = calc_sync_gen(cur_gen);
-        chicken_swarm->doMove(cur_gen, cur_gen % sync_gen == 0);
+
+        chicken_swarm->doMove([&](size_t i) {
+            return chicken_swarm->getAgents()[i]->calcMove(cur_gen, cur_gen % sync_gen == 0);
+        });
+        fish_swarm->doMove([&](size_t i) {
+            return fish_swarm->getAgents()[i]->calcMove(cur_gen, cur_gen % sync_gen == 0);
+        });
+
+        swarmsExchange(chicken_swarm, fish_swarm, num_agents_for_exchange);
+
         if (cur_gen % sync_gen == 0)
         {
             chicken_swarm->updateAgentsRoles();
@@ -230,8 +258,55 @@ RunResult run(size_t ndim, const std::shared_ptr<FitnessFunction> &fitness_funct
 
     constexpr bool print_verbose = false;
     chicken_swarm->printData(print_verbose);
+    fish_swarm->printData(print_verbose);
 
     return RunResult(chicken_swarm->getOptimalX(), chicken_swarm->getOptimalValue());
+}
+
+
+void swarmsExchange(
+    const std::shared_ptr<ChickenSwarm> &chicken_swarm,
+    const std::shared_ptr<FishSwarm> &fish_swarm,
+    size_t num_agents_for_exchange
+)
+{
+    // Обмен значениями
+    size_t chicken_best_agent_i = chicken_swarm->getOptimalAgentIndex();
+    size_t fish_best_agent_i = fish_swarm->getOptimalAgentIndex();
+
+    std::deque<size_t> chicken_exchange_indices(chicken_swarm->getAgents().size());
+    std::deque<size_t> fish_exchange_indices(fish_swarm->getAgents().size());
+    std::iota(chicken_exchange_indices.begin(), chicken_exchange_indices.end(), 0);
+    std::iota(fish_exchange_indices.begin(), fish_exchange_indices.end(), 0);
+
+    chicken_exchange_indices.erase(chicken_exchange_indices.begin() + chicken_best_agent_i);
+    fish_exchange_indices.erase(fish_exchange_indices.begin() + fish_best_agent_i);
+
+    auto rng = std::default_random_engine {};
+    std::shuffle(chicken_exchange_indices.begin(), chicken_exchange_indices.begin(), rng);
+    std::shuffle(fish_exchange_indices.begin(), fish_exchange_indices.begin(), rng);
+
+    chicken_exchange_indices.resize(num_agents_for_exchange - 1);
+    fish_exchange_indices.resize(num_agents_for_exchange - 1);
+
+    chicken_exchange_indices.push_front(chicken_best_agent_i);
+    fish_exchange_indices.push_front(fish_best_agent_i);
+
+    for (size_t i = 0; i < num_agents_for_exchange; i++)
+    {
+        auto swap_X = chicken_swarm->getAgents()[chicken_exchange_indices[i]]->getX();
+        chicken_swarm->getAgents()[chicken_exchange_indices[i]]->updateX(
+            fish_swarm->getAgents()[fish_exchange_indices[i]]->getX()
+        );
+        fish_swarm->getAgents()[fish_exchange_indices[i]]->updateX(swap_X);
+    }
+
+    chicken_swarm->doMove([&](size_t i) {
+        return chicken_swarm->getAgents()[i]->getX();
+    });
+    fish_swarm->doMove([&](size_t i) {
+        return fish_swarm->getAgents()[i]->getX();
+    });
 }
 
 

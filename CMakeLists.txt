@@ -20,10 +20,10 @@ add_executable(
     solution/chicken.h
     solution/chicken_swarm.cpp
     solution/chicken_swarm.h
-    # solution/fish_swarm.cpp
-    # solution/fish_swarm.h
-    # solution/fish.cpp
-    # solution/fish.h
+    solution/fish_swarm.cpp
+    solution/fish_swarm.h
+    solution/fish.cpp
+    solution/fish.h
     solution/fitness_function.cpp
     solution/fitness_function.h
     solution/fitness_functions/alpine_1.cpp

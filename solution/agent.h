@@ -27,7 +27,7 @@ public:
     {}
 
     virtual std::string getAgentType();
-    virtual Eigen::VectorXd calcMove(size_t t, bool before_role_update_move);
+    Eigen::VectorXd calcMove(size_t t, bool before_role_update_move);
 
     void updateCachedFitnessValue(double cached_fitness_value);
     double getCachedFitnessValue();

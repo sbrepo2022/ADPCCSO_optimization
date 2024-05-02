@@ -14,20 +14,19 @@ class Fish;
 class FishSwarm : public Swarm<FishSwarm>
 {
 private:
+    double step;
+    double visual;
+
     void initAgents(const std::vector<Eigen::VectorXd> &X);
 
 public:
-    FishSwarm(
-        const std::shared_ptr<FitnessFunction> &fitness_function,
-        size_t agents_number
-    )
+    FishSwarm(const std::shared_ptr<FitnessFunction> &fitness_function, double step, double visual)
         :
-        Swarm(fitness_function, agents_number)
+        Swarm(fitness_function),
+        step(step),
+        visual(visual)
     {
     }
-
-    void startupAgentsInit(const std::vector<Eigen::VectorXd> &X);
-    void doMove(size_t t);
 
     void printData(bool verbose = false);
 };

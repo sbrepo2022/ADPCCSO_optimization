@@ -42,7 +42,7 @@ public:
         double learn_factor_max
     )
         :
-        Swarm(fitness_function, rootsters_number + hens_number + chicks_number),
+        Swarm(fitness_function),
         rootsters_number(rootsters_number),
         hens_number(hens_number),
         chicks_number(chicks_number),
@@ -52,7 +52,6 @@ public:
     {
     }
 
-    void startupAgentsInit(const std::vector<Eigen::VectorXd> &X);
     void updateAgentsRoles();
 
     std::vector<std::shared_ptr<Rootster>>& getRootsters();

@@ -105,12 +105,6 @@ void ChickenSwarm::initAgents(const std::vector<Eigen::VectorXd> &X)
 }
 
 
-void ChickenSwarm::startupAgentsInit(const std::vector<Eigen::VectorXd> &X)
-{
-    this->initAgents(X);
-}
-
-
 void ChickenSwarm::updateAgentsRoles()
 {
     std::vector<Eigen::VectorXd> X;
@@ -159,19 +153,6 @@ double ChickenSwarm::getLearnFactorMax()
 
 void ChickenSwarm::printData(bool verbose)
 {
-    std::cout << "\n";
-    std::cout << "Best fitness value: " << this->getOptimalValue() << std::endl;
-    std::cout << "Best position: [ " << this->getOptimalX().transpose() << " ]" << std::endl;
-
-    if (verbose)
-    {
-        for (auto& agent : this->getAgents())
-        {
-            std::cout << "Agent [" << agent->getAgentIndex()
-                    <<  "] in position: [ " << agent->getX().transpose()
-                    << " ] with fitness value: " << agent->getCachedFitnessValue()
-                    << std::endl;
-        }
-    }
-    std::cout << "\n";
+    std::cout << "Chicken swarm data:";
+    Swarm::printData(verbose);
 }

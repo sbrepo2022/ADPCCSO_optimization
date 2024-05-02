@@ -5,6 +5,7 @@
 #include <memory>
 #include <limits>
 #include <stdexcept>
+#include <functional>
 
 #include "fitness_function.h"
 #include "agent_t.h"
@@ -15,12 +16,12 @@ class Swarm : public std::enable_shared_from_this<SwarmT>
 {
 protected:
     std::shared_ptr<FitnessFunction> fitness_function;
-    size_t agents_number;
 
     std::vector<std::shared_ptr<AgentT<SwarmT>>> all_agents;         // Sorted by value of fitness function
 
     Eigen::VectorXd optimal_X;
     double optimal_value;
+    size_t optimal_agent_index;
 
     virtual void initAgents(const std::vector<Eigen::VectorXd> &X) = 0;
 
@@ -54,16 +55,22 @@ public:
     }
 
 
-    Swarm(const std::shared_ptr<FitnessFunction> &fitness_function, size_t agents_number)
+    Swarm(const std::shared_ptr<FitnessFunction> &fitness_function)
         :
-        fitness_function(fitness_function),
-        agents_number(agents_number)
+        fitness_function(fitness_function)
     {
         optimal_value = std::numeric_limits<double>::max();
     }
 
+    virtual ~Swarm() {}
 
-    void doMove(size_t t, bool before_role_update_move = false)
+    void startupAgentsInit(const std::vector<Eigen::VectorXd> &X)
+    {
+        this->initAgents(X);
+    }
+
+
+    void doMove(std::function<Eigen::VectorXd(size_t)> calc_move)
     {
         std::vector<Eigen::VectorXd> old_X;
         std::vector<Eigen::VectorXd> new_X;
@@ -76,7 +83,7 @@ public:
         }
         for (size_t i = 0; i < this->all_agents.size(); i++)
         {
-            new_X.push_back(this->all_agents[i]->calcMove(t, before_role_update_move));
+            new_X.push_back(calc_move(i));
         }
         for (size_t i = 0; i < this->all_agents.size(); i++)
         {
@@ -104,6 +111,7 @@ public:
         {
             this->optimal_value = best_value;
             this->optimal_X = best_X;
+            this->optimal_agent_index = best_agent_index;
         }
     }
 
@@ -126,5 +134,28 @@ public:
     }
 
 
-    virtual void printData(bool verbose = false) = 0;
+    size_t getOptimalAgentIndex()
+    {
+        return this->optimal_agent_index;
+    }
+
+
+    virtual void printData(bool verbose = false)
+    {
+        std::cout << "\n";
+        std::cout << "Best fitness value: " << this->getOptimalValue() << std::endl;
+        std::cout << "Best position: [ " << this->getOptimalX().transpose() << " ]" << std::endl;
+
+        if (verbose)
+        {
+            for (auto& agent : this->getAgents())
+            {
+                std::cout << "Agent [" << agent->getAgentIndex()
+                        <<  "] in position: [ " << agent->getX().transpose()
+                        << " ] with fitness value: " << agent->getCachedFitnessValue()
+                        << std::endl;
+            }
+        }
+        std::cout << "\n";
+    }
 };
