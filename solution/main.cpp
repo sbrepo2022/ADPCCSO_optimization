@@ -46,11 +46,21 @@ enum class GraphMode
 };
 
 
+enum class SwarmUsage
+{
+    NONE=0x0,
+    CHICKEN=0x1,
+    FISH=0x2,
+    BOTH=0x3
+};
+
+
 std::map<std::string, std::shared_ptr<FitnessFunction>> initFitnessFunctions();
 cxxopts::ParseResult parseOptions(int argc, char *argv[], const std::map<std::string, std::shared_ptr<FitnessFunction>> &fitness_functions);
 void printHelp(const cxxopts::Options &options);
+SwarmUsage getSwarmUsage(const std::string &option);
 
-RunResult run(size_t ndim, const std::shared_ptr<FitnessFunction> &fitness_function);
+RunResult run(size_t ndim, const std::shared_ptr<FitnessFunction> &fitness_function, SwarmUsage swarm_usage);
 void swarmsExchange(
     const std::shared_ptr<ChickenSwarm> &chicken_swarm,
     const std::shared_ptr<FishSwarm> &fish_swarm,
@@ -82,8 +92,12 @@ cxxopts::ParseResult parseOptions(cxxopts::Options &options, int argc, char *arg
         fitness_help += key.first + ", ";
     }
 
+    std::string swarms_help = "\t\tAvailable swarms usage: chicken, fish, both";
+
     options.add_options()
         ("f,fitness", "Fitness function", cxxopts::value<std::string>()->default_value("spherical"), fitness_help)
+        ("t,threads", "Number of parallel threads", cxxopts::value<int>()->default_value("8"))
+        ("s,swarms", "Swarm usage", cxxopts::value<std::string>()->default_value("both"))
         ("h,help", "Print usage")
         ;
 
@@ -95,6 +109,15 @@ void printHelp(const cxxopts::Options &options)
 {
     std::cout << options.help() << std::endl;
     exit(0);
+}
+
+
+SwarmUsage getSwarmUsage(const std::string &option)
+{
+    if (option == "chicken") return SwarmUsage::CHICKEN;
+    if (option == "fish") return SwarmUsage::FISH;
+    if (option == "both") return SwarmUsage::BOTH;
+    return SwarmUsage::NONE;
 }
 
 
@@ -121,6 +144,7 @@ int main(int argc, char *argv[]) {
     }
 
     auto fitness_function = fitness_functions[opt_parse_res["fitness"].as<std::string>()];
+    auto swarm_usage = getSwarmUsage(opt_parse_res["swarms"].as<std::string>());
 
 
     // Рассчеты
@@ -131,7 +155,7 @@ int main(int argc, char *argv[]) {
     {
         try
         {
-            auto cur_res = run(ndim, fitness_function);
+            auto cur_res = run(ndim, fitness_function, swarm_usage);
 
             // Запись результатов
             std::lock_guard<std::mutex> lock(run_mtx);
@@ -145,7 +169,7 @@ int main(int argc, char *argv[]) {
 
 
     const int num_tasks = 32;
-    const int num_threads = 8;
+    const int num_threads = opt_parse_res["threads"].as<int>();
 
     std::vector<std::future<void>> futures;
     int task_count = 0;
@@ -184,18 +208,18 @@ int main(int argc, char *argv[]) {
 }
 
 
-RunResult run(size_t ndim, const std::shared_ptr<FitnessFunction> &fitness_function)
+RunResult run(size_t ndim, const std::shared_ptr<FitnessFunction> &fitness_function, SwarmUsage swarm_usage)
 {
     // Общие параметры
     size_t num_agents = 200;
-    size_t num_agents_for_exchange = 20;
-    size_t num_chicken_agents = num_agents / 2;
-    size_t num_fish_agents = num_agents / 2;
+    size_t num_agents_for_exchange = num_agents / 4;
+    size_t num_chicken_agents = swarm_usage == SwarmUsage::BOTH ? num_agents / 2 : (swarm_usage == SwarmUsage::CHICKEN ? num_agents : 0);
+    size_t num_fish_agents = swarm_usage == SwarmUsage::BOTH ? num_agents / 2 : (swarm_usage == SwarmUsage::FISH ? num_agents : 0);
+    size_t max_gen = 1000;
 
     // Параметры куриного роя
     double rootsters_coef = 0.2;
     double hens_coef = 0.6;
-    size_t max_gen = 1000;
     double learn_factor_min = 0.4;
     double learn_factor_max = 0.9;
 
@@ -212,22 +236,30 @@ RunResult run(size_t ndim, const std::shared_ptr<FitnessFunction> &fitness_funct
     fitness_function->setDCoef(d_coef);
 
     // Инициализация куриного роя
-    std::vector<Eigen::VectorXd> X_chicken = AgentInitializer::hypercubeUniformInitializer(hypercube, num_chicken_agents);
-    auto chicken_swarm = std::make_shared<ChickenSwarm>(
-        fitness_function,
-        rootsters_coef * num_chicken_agents,
-        hens_coef * num_chicken_agents,
-        num_chicken_agents - rootsters_coef * num_chicken_agents - hens_coef * num_chicken_agents,
-        max_gen,
-        learn_factor_min,
-        learn_factor_max
-    );
-    chicken_swarm->startupAgentsInit(X_chicken);
+    std::shared_ptr<ChickenSwarm> chicken_swarm;
+    if ((size_t)swarm_usage & (size_t)SwarmUsage::CHICKEN)
+    {
+        std::vector<Eigen::VectorXd> X_chicken = AgentInitializer::hypercubeUniformInitializer(hypercube, num_chicken_agents);
+        chicken_swarm = std::make_shared<ChickenSwarm>(
+            fitness_function,
+            rootsters_coef * num_chicken_agents,
+            hens_coef * num_chicken_agents,
+            num_chicken_agents - rootsters_coef * num_chicken_agents - hens_coef * num_chicken_agents,
+            max_gen,
+            learn_factor_min,
+            learn_factor_max
+        );
+        chicken_swarm->startupAgentsInit(X_chicken);
+    }
 
     // Инициализация роя рыб
-    std::vector<Eigen::VectorXd> X_fish = AgentInitializer::hypercubeUniformInitializer(hypercube, num_fish_agents);
-    auto fish_swarm = std::make_shared<FishSwarm>(fitness_function, fish_step, fish_visual);
-    fish_swarm->startupAgentsInit(X_fish);
+    std::shared_ptr<FishSwarm> fish_swarm;
+    if ((size_t)swarm_usage & (size_t)SwarmUsage::FISH)
+    {
+        std::vector<Eigen::VectorXd> X_fish = AgentInitializer::hypercubeUniformInitializer(hypercube, num_fish_agents);
+        fish_swarm = std::make_shared<FishSwarm>(fitness_function, fish_step, fish_visual);
+        fish_swarm->startupAgentsInit(X_fish);
+    }
 
     // Алгоритм локализации минимума
     auto calc_sync_gen = [](size_t t) -> size_t
@@ -241,26 +273,40 @@ RunResult run(size_t ndim, const std::shared_ptr<FitnessFunction> &fitness_funct
     {
         sync_gen = calc_sync_gen(cur_gen);
 
-        chicken_swarm->doMove([&](size_t i) {
-            return chicken_swarm->getAgents()[i]->calcMove(cur_gen, cur_gen % sync_gen == 0);
-        });
-        fish_swarm->doMove([&](size_t i) {
-            return fish_swarm->getAgents()[i]->calcMove(cur_gen, cur_gen % sync_gen == 0);
-        });
+        if ((size_t)swarm_usage & (size_t)SwarmUsage::CHICKEN)
+            chicken_swarm->doMove([&chicken_swarm, cur_gen, sync_gen](size_t i) {
+                return chicken_swarm->getAgents()[i]->calcMove(cur_gen, cur_gen % sync_gen == 0);
+            });
 
-        swarmsExchange(chicken_swarm, fish_swarm, num_agents_for_exchange);
+        if ((size_t)swarm_usage & (size_t)SwarmUsage::FISH)
+            fish_swarm->doMove([&fish_swarm, cur_gen, sync_gen](size_t i) {
+                return fish_swarm->getAgents()[i]->calcMove(cur_gen, cur_gen % sync_gen == 0);
+            });
 
-        if (cur_gen % sync_gen == 0)
-        {
-            chicken_swarm->updateAgentsRoles();
-        }
+        if (swarm_usage == SwarmUsage::BOTH)
+            swarmsExchange(chicken_swarm, fish_swarm, num_agents_for_exchange);
+
+        if ((size_t)swarm_usage & (size_t)SwarmUsage::CHICKEN)
+            if (cur_gen % sync_gen == 0)
+            {
+                chicken_swarm->updateAgentsRoles();
+            }
     }
 
     constexpr bool print_verbose = false;
-    chicken_swarm->printData(print_verbose);
-    fish_swarm->printData(print_verbose);
+    if ((size_t)swarm_usage & (size_t)SwarmUsage::CHICKEN) chicken_swarm->printData(print_verbose);
+    if ((size_t)swarm_usage & (size_t)SwarmUsage::FISH) fish_swarm->printData(print_verbose);
 
-    return RunResult(chicken_swarm->getOptimalX(), chicken_swarm->getOptimalValue());
+    if (swarm_usage == SwarmUsage::BOTH)
+    {
+        if (chicken_swarm->getOptimalValue() < fish_swarm->getOptimalValue())
+            return RunResult(chicken_swarm->getOptimalX(), chicken_swarm->getOptimalValue());
+        else
+            return RunResult(fish_swarm->getOptimalX(), fish_swarm->getOptimalValue());
+    }
+    else if (swarm_usage == SwarmUsage::CHICKEN) return RunResult(chicken_swarm->getOptimalX(), chicken_swarm->getOptimalValue());
+    else if (swarm_usage == SwarmUsage::FISH) return RunResult(fish_swarm->getOptimalX(), fish_swarm->getOptimalValue());
+    else return RunResult(Eigen::VectorXd::Zero(ndim), 0.0);
 }
 
 
@@ -282,15 +328,30 @@ void swarmsExchange(
     chicken_exchange_indices.erase(chicken_exchange_indices.begin() + chicken_best_agent_i);
     fish_exchange_indices.erase(fish_exchange_indices.begin() + fish_best_agent_i);
 
-    auto rng = std::default_random_engine {};
-    std::shuffle(chicken_exchange_indices.begin(), chicken_exchange_indices.begin(), rng);
-    std::shuffle(fish_exchange_indices.begin(), fish_exchange_indices.begin(), rng);
+    std::random_device rd;
+    std::mt19937 g(rd());
+    std::shuffle(chicken_exchange_indices.begin(), chicken_exchange_indices.end(), g);
+    std::shuffle(fish_exchange_indices.begin(), fish_exchange_indices.end(), g);
 
     chicken_exchange_indices.resize(num_agents_for_exchange - 1);
     fish_exchange_indices.resize(num_agents_for_exchange - 1);
 
     chicken_exchange_indices.push_front(chicken_best_agent_i);
     fish_exchange_indices.push_front(fish_best_agent_i);
+
+    // Debug
+    // constexpr bool print_verbose = true;
+    // chicken_swarm->printData(print_verbose);
+    // fish_swarm->printData(print_verbose);
+
+    // std::cout << "Chickens for exchange: [ ";
+    // for (auto i : chicken_exchange_indices) std::cout << i << " ";
+    // std::cout << "]\n";
+
+    // std::cout << "Fish for exchange: [ ";
+    // for (auto i : fish_exchange_indices) std::cout << i << " ";
+    // std::cout << "]\n";
+    // End debug
 
     for (size_t i = 0; i < num_agents_for_exchange; i++)
     {

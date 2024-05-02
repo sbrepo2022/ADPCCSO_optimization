@@ -62,28 +62,28 @@ Eigen::VectorXd Fish::calcMove(size_t t, bool before_role_update_move)
         double prey_fitness_value = this->getFitness()->calc(
             prey_X,
             this->getAgentIndex(),
-            Swarm<FishSwarm>::toGenericAgentVector(agents)
+            swarm_ptr->getGenericAgents()
         );
         double swarming_fitness_value = this->getFitness()->calc(
             swarming_X,
             this->getAgentIndex(),
-            Swarm<FishSwarm>::toGenericAgentVector(agents)
+            swarm_ptr->getGenericAgents()
         );
         double following_fitness_value = this->getFitness()->calc(
             following_X,
             this->getAgentIndex(),
-            Swarm<FishSwarm>::toGenericAgentVector(agents)
+            swarm_ptr->getGenericAgents()
         );
 
-        if (prey_fitness_value >= swarming_fitness_value && prey_fitness_value >= following_fitness_value)
+        if (prey_fitness_value <= swarming_fitness_value && prey_fitness_value <= following_fitness_value)
         {
             return prey_X;
         }
-        else if (swarming_fitness_value >= prey_fitness_value && swarming_fitness_value >= following_fitness_value)
+        else if (swarming_fitness_value <= prey_fitness_value && swarming_fitness_value <= following_fitness_value)
         {
             return swarming_X;
         }
-        else if (following_fitness_value >= prey_fitness_value && following_fitness_value >= swarming_fitness_value)
+        else if (following_fitness_value <= prey_fitness_value && following_fitness_value <= swarming_fitness_value)
         {
             return following_X;
         }

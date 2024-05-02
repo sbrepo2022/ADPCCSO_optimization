@@ -14,6 +14,8 @@ void FishSwarm::initAgents(const std::vector<Eigen::VectorXd> &X)
         this->all_agents.push_back(fish);
     }
 
+    this->generic_agents = Swarm::toGenericAgentVector(this->all_agents);
+
     size_t best_agent_index = this->updateFitnessValues();
     this->optimal_value = this->all_agents[best_agent_index]->getCachedFitnessValue();
     this->optimal_X = this->all_agents[best_agent_index]->getX();

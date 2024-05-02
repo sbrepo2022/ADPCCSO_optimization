@@ -18,6 +18,7 @@ protected:
     std::shared_ptr<FitnessFunction> fitness_function;
 
     std::vector<std::shared_ptr<AgentT<SwarmT>>> all_agents;         // Sorted by value of fitness function
+    std::vector<std::shared_ptr<Agent>> generic_agents;         // Sorted by value of fitness function
 
     Eigen::VectorXd optimal_X;
     double optimal_value;
@@ -34,7 +35,7 @@ protected:
         {
             double fitness_value = this->all_agents[i]->getFitness()->calc(
                 this->all_agents[i]->getAgentIndex(),
-                Swarm<SwarmT>::toGenericAgentVector(this->all_agents)
+                this->generic_agents
             );
             this->all_agents[i]->updateCachedFitnessValue(fitness_value);
             if (fitness_value < best_value)
@@ -48,13 +49,14 @@ protected:
         return best_agent_index;
     }
 
-public:
+
     static std::vector<std::shared_ptr<Agent>> toGenericAgentVector(const std::vector<std::shared_ptr<AgentT<SwarmT>>> &specific_agents)
     {
         return std::vector<std::shared_ptr<Agent>>(specific_agents.begin(), specific_agents.end());
     }
 
 
+public:
     Swarm(const std::shared_ptr<FitnessFunction> &fitness_function)
         :
         fitness_function(fitness_function)
@@ -70,7 +72,7 @@ public:
     }
 
 
-    void doMove(std::function<Eigen::VectorXd(size_t)> calc_move)
+    void doMove(const std::function<Eigen::VectorXd(size_t)> &calc_move)
     {
         std::vector<Eigen::VectorXd> old_X;
         std::vector<Eigen::VectorXd> new_X;
@@ -122,6 +124,12 @@ public:
     }
 
 
+    std::vector<std::shared_ptr<Agent>>& getGenericAgents()
+    {
+        return this->generic_agents;
+    }
+
+
     double getOptimalValue()
     {
         return this->optimal_value;
@@ -143,6 +151,7 @@ public:
     virtual void printData(bool verbose = false)
     {
         std::cout << "\n";
+        std::cout << "Best agent index: " << this->getOptimalAgentIndex() << std::endl;
         std::cout << "Best fitness value: " << this->getOptimalValue() << std::endl;
         std::cout << "Best position: [ " << this->getOptimalX().transpose() << " ]" << std::endl;
 
