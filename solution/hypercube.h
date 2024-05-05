@@ -12,4 +12,6 @@ public:
     Hypercube(const Eigen::VectorXd &base_point, double len)
         : base_point(base_point), len(len)
     {}
+
+    bool isXIn(const Eigen::VectorXd &X) const;
 };

@@ -60,3 +60,14 @@ void Agent::updateAgentIndex(size_t agent_index)
 {
     this->agent_index = agent_index;
 }
+
+
+AgentClass Agent::getAgentClass()
+{
+    return this->agent_class;
+}
+
+void Agent::updateAgentClass(AgentClass agent_class)
+{
+    this->agent_class = agent_class;
+}

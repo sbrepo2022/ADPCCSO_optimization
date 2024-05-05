@@ -30,9 +30,27 @@
 
 struct RunResult
 {
-    RunResult(Eigen::VectorXd best_X, double best_fitness_val)
-        : best_X(best_X), best_fitness_val(best_fitness_val)
+    RunResult(
+        Hypercube &limits,
+        const std::vector<Eigen::VectorXd> &all_X,
+        const std::vector<double> &all_fitness_vals,
+        const std::vector<AgentClass> &agent_classes,
+        const Eigen::VectorXd &best_X,
+        double best_fitness_val
+    )
+        : limits(limits)
+        , all_X(all_X)
+        , all_fitness_vals(all_fitness_vals)
+        , agent_classes(agent_classes)
+        , best_X(best_X)
+        , best_fitness_val(best_fitness_val)
         {}
+
+    Hypercube limits;
+
+    std::vector<Eigen::VectorXd> all_X;
+    std::vector<double> all_fitness_vals;
+    std::vector<AgentClass> agent_classes;
 
     Eigen::VectorXd best_X;
     double best_fitness_val;
@@ -60,16 +78,16 @@ cxxopts::ParseResult parseOptions(int argc, char *argv[], const std::map<std::st
 void printHelp(const cxxopts::Options &options);
 SwarmUsage getSwarmUsage(const std::string &option);
 
-RunResult run(size_t ndim, const std::shared_ptr<FitnessFunction> &fitness_function, SwarmUsage swarm_usage);
+RunResult run(size_t ndim, const std::shared_ptr<FitnessFunction> &fitness_function, SwarmUsage swarm_usage, double b_coef_opt, double d_coef_mult);
 void swarmsExchange(
     const std::shared_ptr<ChickenSwarm> &chicken_swarm,
     const std::shared_ptr<FishSwarm> &fish_swarm,
     size_t num_agents_for_exchange
 );
 
-void saveResultX(const std::vector<RunResult> &run_results);
+void saveResultX(const std::vector<RunResult> &run_results, bool best);
 void printRunStatistics(const std::vector<RunResult> &run_results);
-void draw2DGraphic(const std::vector<RunResult> &run_results, const std::shared_ptr<FitnessFunction> &fitness_function);
+void draw2DGraphic(const std::vector<RunResult> &run_results, const std::shared_ptr<FitnessFunction> &fitness_function, bool best);
 
 
 std::map<std::string, std::shared_ptr<FitnessFunction>> initFitnessFunctions(size_t ndim)
@@ -96,8 +114,12 @@ cxxopts::ParseResult parseOptions(cxxopts::Options &options, int argc, char *arg
 
     options.add_options()
         ("f,fitness", "Fitness function", cxxopts::value<std::string>()->default_value("spherical"), fitness_help)
-        ("t,threads", "Number of parallel threads", cxxopts::value<int>()->default_value("8"))
-        ("s,swarms", "Swarm usage", cxxopts::value<std::string>()->default_value("both"))
+        ("t,multistart-threads", "Number of parallel threads", cxxopts::value<int>()->default_value("1"))
+        ("n,number-starts", "Number of starts", cxxopts::value<int>()->default_value("1"))
+        ("b,best", "Write only best agent of each multistart", cxxopts::value<bool>()->default_value("true"))
+        ("s,swarms", "Swarm usage", cxxopts::value<std::string>()->default_value("chicken"))
+        ("b-coef", "b-coef", cxxopts::value<double>()->default_value("1.0"))
+        ("d-coef-mult", "d-coef multiplier", cxxopts::value<double>()->default_value("1.0"))
         ("h,help", "Print usage")
         ;
 
@@ -155,7 +177,7 @@ int main(int argc, char *argv[]) {
     {
         try
         {
-            auto cur_res = run(ndim, fitness_function, swarm_usage);
+            auto cur_res = run(ndim, fitness_function, swarm_usage, opt_parse_res["b-coef"].as<double>(), opt_parse_res["d-coef-mult"].as<double>());
 
             // Запись результатов
             std::lock_guard<std::mutex> lock(run_mtx);
@@ -168,8 +190,8 @@ int main(int argc, char *argv[]) {
     };
 
 
-    const int num_tasks = 32;
-    const int num_threads = opt_parse_res["threads"].as<int>();
+    const int num_tasks = opt_parse_res["number-starts"].as<int>();
+    const int num_threads = opt_parse_res["multistart-threads"].as<int>();
 
     std::vector<std::future<void>> futures;
     int task_count = 0;
@@ -200,21 +222,22 @@ int main(int argc, char *argv[]) {
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
     std::cout << std::endl << "Total execution time: " << duration.count() / 1000.0 << " seconds" << std::endl;
 
-    saveResultX(run_results);
+    bool best = opt_parse_res["best"].as<bool>();
+    saveResultX(run_results, best);
     printRunStatistics(run_results);
-    if (ndim == 2) draw2DGraphic(run_results, fitness_function);
+    if (ndim == 2) draw2DGraphic(run_results, fitness_function, best);
 
     return 0;
 }
 
 
-RunResult run(size_t ndim, const std::shared_ptr<FitnessFunction> &fitness_function, SwarmUsage swarm_usage)
+RunResult run(size_t ndim, const std::shared_ptr<FitnessFunction> &fitness_function, SwarmUsage swarm_usage, double b_coef_opt, double d_coef_mult)
 {
     // Общие параметры
-    size_t num_agents = 200;
-    size_t num_agents_for_exchange = num_agents / 4;
-    size_t num_chicken_agents = swarm_usage == SwarmUsage::BOTH ? num_agents / 2 : (swarm_usage == SwarmUsage::CHICKEN ? num_agents : 0);
-    size_t num_fish_agents = swarm_usage == SwarmUsage::BOTH ? num_agents / 2 : (swarm_usage == SwarmUsage::FISH ? num_agents : 0);
+    size_t num_agents = 50;
+    size_t num_agents_for_exchange = 1;
+    size_t num_chicken_agents = swarm_usage == SwarmUsage::BOTH ? 25 : (swarm_usage == SwarmUsage::CHICKEN ? num_agents : 0);
+    size_t num_fish_agents = swarm_usage == SwarmUsage::BOTH ? 25 : (swarm_usage == SwarmUsage::FISH ? num_agents : 0);
     size_t max_gen = 1000;
 
     // Параметры куриного роя
@@ -229,8 +252,8 @@ RunResult run(size_t ndim, const std::shared_ptr<FitnessFunction> &fitness_funct
 
     auto hypercube = fitness_function->getBoundHypercube();
 
-    double b_coef = 1;
-    double d_coef = math_helpers::calcDCoef(hypercube.len, num_agents, ndim);
+    double b_coef = b_coef_opt;
+    double d_coef = math_helpers::calcDCoef(hypercube.len, num_agents, ndim) * d_coef_mult;
 
     fitness_function->setBCoef(b_coef);
     fitness_function->setDCoef(d_coef);
@@ -293,20 +316,44 @@ RunResult run(size_t ndim, const std::shared_ptr<FitnessFunction> &fitness_funct
             }
     }
 
-    constexpr bool print_verbose = false;
+    constexpr bool print_verbose = true;
     if ((size_t)swarm_usage & (size_t)SwarmUsage::CHICKEN) chicken_swarm->printData(print_verbose);
     if ((size_t)swarm_usage & (size_t)SwarmUsage::FISH) fish_swarm->printData(print_verbose);
+
+    std::vector<Eigen::VectorXd> all_X;
+    std::vector<double> all_fitness_vals;
+    std::vector<AgentClass> agent_classes;
+
+    if ((size_t)swarm_usage & (size_t)SwarmUsage::CHICKEN)
+    {
+        for (auto& agent : chicken_swarm->getAgents())
+        {
+            all_X.push_back(agent->getX());
+            all_fitness_vals.push_back(agent->getCachedFitnessValue());
+            agent_classes.push_back(agent->getAgentClass());
+        }
+    }
+
+    if ((size_t)swarm_usage & (size_t)SwarmUsage::FISH)
+    {
+        for (auto& agent : fish_swarm->getAgents())
+        {
+            all_X.push_back(agent->getX());
+            all_fitness_vals.push_back(agent->getCachedFitnessValue());
+            agent_classes.push_back(agent->getAgentClass());
+        }
+    }
 
     if (swarm_usage == SwarmUsage::BOTH)
     {
         if (chicken_swarm->getOptimalValue() < fish_swarm->getOptimalValue())
-            return RunResult(chicken_swarm->getOptimalX(), chicken_swarm->getOptimalValue());
+            return RunResult(hypercube, all_X, all_fitness_vals, agent_classes, chicken_swarm->getOptimalX(), chicken_swarm->getOptimalValue());
         else
-            return RunResult(fish_swarm->getOptimalX(), fish_swarm->getOptimalValue());
+            return RunResult(hypercube, all_X, all_fitness_vals, agent_classes, fish_swarm->getOptimalX(), fish_swarm->getOptimalValue());
     }
-    else if (swarm_usage == SwarmUsage::CHICKEN) return RunResult(chicken_swarm->getOptimalX(), chicken_swarm->getOptimalValue());
-    else if (swarm_usage == SwarmUsage::FISH) return RunResult(fish_swarm->getOptimalX(), fish_swarm->getOptimalValue());
-    else return RunResult(Eigen::VectorXd::Zero(ndim), 0.0);
+    else if (swarm_usage == SwarmUsage::CHICKEN) return RunResult(hypercube, all_X, all_fitness_vals, agent_classes, chicken_swarm->getOptimalX(), chicken_swarm->getOptimalValue());
+    else if (swarm_usage == SwarmUsage::FISH) return RunResult(hypercube, all_X, all_fitness_vals, agent_classes, fish_swarm->getOptimalX(), fish_swarm->getOptimalValue());
+    else return RunResult(hypercube, {}, {}, {}, Eigen::VectorXd::Zero(ndim), 0.0);
 }
 
 
@@ -371,24 +418,48 @@ void swarmsExchange(
 }
 
 
-void saveResultX(const std::vector<RunResult> &run_results)
+void saveResultX(const std::vector<RunResult> &run_results, bool best)
 {
     std::ofstream ofile;
     ofile.open("results.csv");
 
     for (auto& run_res : run_results)
     {
-        for (int j = 0; j < run_res.best_X.size(); j++)
+        if (best)
         {
-            ofile << run_res.best_X[j];
+            for (int j = 0; j < run_res.best_X.size(); j++)
+            {
+                ofile << run_res.best_X[j];
 
-            if (j < run_res.best_X.size() - 1)
-            {
-                ofile << ",";
+                if (j < run_res.best_X.size() - 1)
+                {
+                    ofile << ",";
+                }
+                else
+                {
+                    ofile << "\n";
+                }
             }
-            else
+        }
+        else
+        {
+            for (int i = 0; i < run_res.all_X.size(); i++)
             {
-                ofile << "\n";
+                for (int j = 0; j < run_res.all_X[i].size(); j++)
+                {
+                    if (! run_res.limits.isXIn(run_res.all_X[i])) continue;
+
+                    ofile << run_res.all_X[i][j];
+
+                    if (j < run_res.all_X[i].size() - 1)
+                    {
+                        ofile << ",";
+                    }
+                    else
+                    {
+                        ofile << "\n";
+                    }
+                }
             }
         }
     }
@@ -401,17 +472,34 @@ void printRunStatistics(const std::vector<RunResult> &run_results)
 
     for (auto& run_res : run_results)
     {
-
+        for (auto& ac : run_res.agent_classes)
+        {
+            std::cout << (int)ac;
+        }
     }
+    std::cout << std::endl;
 }
 
 
-void draw2DGraphic(const std::vector<RunResult> &run_results, const std::shared_ptr<FitnessFunction> &fitness_function)
+void draw2DGraphic(const std::vector<RunResult> &run_results, const std::shared_ptr<FitnessFunction> &fitness_function, bool best)
 {
     // Сохранение точек в файл
     std::ofstream pointsFile("points.dat");
     for (const auto& run_res : run_results) {
-        pointsFile << run_res.best_X[0] << " " << run_res.best_X[1] << " " << run_res.best_fitness_val << "\n";
+        if (best)
+        {
+            pointsFile << run_res.best_X[0] << " " << run_res.best_X[1] << " " << run_res.best_fitness_val << "\n";
+        }
+        else
+        {
+            for (int i = 0; i < run_res.all_X.size(); i++)
+            {
+                if (run_res.limits.isXIn(run_res.all_X[i]))
+                {
+                    pointsFile << run_res.all_X[i][0] << " " << run_res.all_X[i][1] << " " << run_res.all_fitness_vals[i] << "\n";
+                }
+            }
+        }
     }
     pointsFile.close();
 

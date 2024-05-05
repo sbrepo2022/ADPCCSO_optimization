@@ -17,7 +17,7 @@ private:
     double step;
     double visual;
 
-    void initAgents(const std::vector<Eigen::VectorXd> &X);
+    void initAgents(const std::vector<Eigen::VectorXd> &X, const std::vector<AgentClass> &agent_classes);
 
 public:
     FishSwarm(const std::shared_ptr<FitnessFunction> &fitness_function, double step, double visual)

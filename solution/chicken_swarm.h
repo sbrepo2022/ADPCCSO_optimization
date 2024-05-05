@@ -29,7 +29,7 @@ private:
     std::vector<std::shared_ptr<Hen>> all_hens;
     std::vector<std::shared_ptr<Chick>> all_chicks;
 
-    void initAgents(const std::vector<Eigen::VectorXd> &X);
+    void initAgents(const std::vector<Eigen::VectorXd> &X, const std::vector<AgentClass> &agent_classes);
 
 public:
     ChickenSwarm(

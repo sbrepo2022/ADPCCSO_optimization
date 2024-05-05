@@ -4,6 +4,12 @@
 #include <cmath>
 
 
+bool FitnessFunction::acceptable(const Eigen::VectorXd &X)
+{
+    return true;
+}
+
+
 double FitnessFunction::calc(size_t index_in_model, const std::vector<std::shared_ptr<Agent>>& agents)
 {
     double sum = this->fitness(agents[index_in_model]->getX());

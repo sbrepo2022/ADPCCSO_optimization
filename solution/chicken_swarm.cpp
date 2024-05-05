@@ -7,7 +7,7 @@
 #include "chick.h"
 
 
-void ChickenSwarm::initAgents(const std::vector<Eigen::VectorXd> &X)
+void ChickenSwarm::initAgents(const std::vector<Eigen::VectorXd> &X, const std::vector<AgentClass> &agent_classes)
 {
     // Инициализация, сортировка, группировка, назначение классов и иерархии.
 
@@ -18,6 +18,7 @@ void ChickenSwarm::initAgents(const std::vector<Eigen::VectorXd> &X)
     for (auto& x : X)
     {
         agents_tmp.push_back(std::make_shared<Agent>(x, this->fitness_function, agents_tmp.size()));
+        agents_tmp[agents_tmp.size() - 1]->updateAgentClass(agent_classes[agents_tmp.size() - 1]);
     }
 
     // Вычисление значений фитнесс-функции
@@ -50,6 +51,7 @@ void ChickenSwarm::initAgents(const std::vector<Eigen::VectorXd> &X)
             rootster_i
         );
         rootster->attachToSwarm(this->shared_from_this());
+        rootster->updateAgentClass(agents_tmp[agent_i]->getAgentClass());
         this->all_rootsters.push_back(rootster);
         this->all_agents.push_back(rootster);
         agent_i++;
@@ -66,6 +68,7 @@ void ChickenSwarm::initAgents(const std::vector<Eigen::VectorXd> &X)
             hen_i
         );
         hen->attachToSwarm(this->shared_from_this());
+        hen->updateAgentClass(agents_tmp[agent_i]->getAgentClass());
         this->all_hens.push_back(hen);
         this->all_agents.push_back(hen);
         agent_i++;
@@ -88,6 +91,7 @@ void ChickenSwarm::initAgents(const std::vector<Eigen::VectorXd> &X)
             chick_i
         );
         chick->attachToSwarm(this->shared_from_this());
+        chick->updateAgentClass(agents_tmp[agent_i]->getAgentClass());
         this->all_chicks.push_back(chick);
         this->all_agents.push_back(chick);
         agent_i++;
@@ -110,11 +114,14 @@ void ChickenSwarm::initAgents(const std::vector<Eigen::VectorXd> &X)
 void ChickenSwarm::updateAgentsRoles()
 {
     std::vector<Eigen::VectorXd> X;
+    std::vector<AgentClass> agent_classes;
     for (auto& agent : this->all_agents)
     {
         X.push_back(agent->getX());
+        agent_classes.push_back(agent->getAgentClass());
     }
-    this->initAgents(X);
+
+    this->initAgents(X, agent_classes);
 }
 
 

@@ -2,15 +2,16 @@
 #include "fish.h"
 
 
-void FishSwarm::initAgents(const std::vector<Eigen::VectorXd> &X)
+void FishSwarm::initAgents(const std::vector<Eigen::VectorXd> &X, const std::vector<AgentClass> &agent_classes)
 {
     this->all_agents.clear();
 
     std::vector<std::shared_ptr<Agent>> agents_tmp;
-    for (auto& x : X)
+    for (int i = 0; i < X.size(); i++)
     {
-        auto fish = std::make_shared<Fish>(x, this->fitness_function, this->all_agents.size(), this->step, this->visual);
+        auto fish = std::make_shared<Fish>(X[i], this->fitness_function, this->all_agents.size(), this->step, this->visual);
         fish->attachToSwarm(this->shared_from_this());
+        fish->updateAgentClass(agent_classes[i]);
         this->all_agents.push_back(fish);
     }
 

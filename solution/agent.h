@@ -10,9 +10,18 @@
 #include "helpers.h"
 
 
+enum class AgentClass
+{
+    ACCEPTABLE,
+    ALMOST_ACCEPTABLE,
+    UNACCEPTABLE
+};
+
+
 class Agent
 {
 protected:
+    AgentClass agent_class;
     Eigen::VectorXd X;
     std::shared_ptr<FitnessFunction> fitness_function;
     size_t agent_index;
@@ -37,6 +46,8 @@ public:
     std::shared_ptr<FitnessFunction>& getFitness();
     size_t getAgentIndex();
     void updateAgentIndex(size_t agent_index);
+    AgentClass getAgentClass();
+    void updateAgentClass(AgentClass agent_class);
 
     virtual ~Agent();
 };

@@ -24,7 +24,7 @@ protected:
     double optimal_value;
     size_t optimal_agent_index;
 
-    virtual void initAgents(const std::vector<Eigen::VectorXd> &X) = 0;
+    virtual void initAgents(const std::vector<Eigen::VectorXd> &X, const std::vector<AgentClass> &agent_classes) = 0;
 
 
     int updateFitnessValues()
@@ -37,6 +37,7 @@ protected:
                 this->all_agents[i]->getAgentIndex(),
                 this->generic_agents
             );
+            //std::cout << "Index [" << i << "], Fitness value: " << fitness_value << " X: " << this->all_agents[i]->getX().transpose() << std::endl;
             this->all_agents[i]->updateCachedFitnessValue(fitness_value);
             if (fitness_value < best_value)
             {
@@ -44,6 +45,7 @@ protected:
                 best_agent_index = i;
             }
         }
+        //std::cout << "Best index: " << best_agent_index << " Best value: " << best_value << std::endl << std::endl;
         if (best_agent_index < 0)
             throw std::domain_error("Cannot find best agent index");
         return best_agent_index;
@@ -68,7 +70,20 @@ public:
 
     void startupAgentsInit(const std::vector<Eigen::VectorXd> &X)
     {
-        this->initAgents(X);
+        std::vector<AgentClass> agent_classes;
+        for (auto& x: X)
+        {
+            if (this->fitness_function->acceptable(x))
+            {
+                agent_classes.push_back(AgentClass::ACCEPTABLE);
+            }
+            else
+            {
+                agent_classes.push_back(AgentClass::UNACCEPTABLE);
+            }
+        }
+
+        this->initAgents(X, agent_classes);
     }
 
 
@@ -111,6 +126,19 @@ public:
         }
         else
         {
+            for (size_t i = 0; i < this->all_agents.size(); i++)
+            {
+                AgentClass old_class = this->all_agents[i]->getAgentClass();
+                Eigen::VectorXd &X_val = this->all_agents[i]->getX();
+                AgentClass new_class = this->fitness_function->acceptable(X_val) ? AgentClass::ACCEPTABLE : AgentClass::UNACCEPTABLE;
+                if (
+                    old_class == AgentClass::ACCEPTABLE && new_class == AgentClass::UNACCEPTABLE ||
+                    old_class == AgentClass::UNACCEPTABLE && new_class == AgentClass::ACCEPTABLE
+                )
+                {
+                    this->all_agents[i]->updateAgentClass(AgentClass::ALMOST_ACCEPTABLE);
+                }
+            }
             this->optimal_value = best_value;
             this->optimal_X = best_X;
             this->optimal_agent_index = best_agent_index;
