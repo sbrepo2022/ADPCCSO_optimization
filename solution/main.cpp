@@ -8,6 +8,7 @@
 #include <future>
 #include <mutex>
 #include <chrono>
+#include <ncurses.h>
 
 #include "cxxopts/cxxopts.h"
 
@@ -16,6 +17,7 @@
 #include "fitness_functions/deflected_corrugated_spring.h"
 #include "fitness_functions/rastrigin.h"
 #include "fitness_functions/spherical.h"
+#include "fitness_functions/main_task.h"
 
 #include "agents_initializer.h"
 #include "chicken_swarm.h"
@@ -78,11 +80,22 @@ enum class SwarmUsage
 
 
 std::map<std::string, std::shared_ptr<FitnessFunction>> initFitnessFunctions();
-cxxopts::ParseResult parseOptions(int argc, char *argv[], const std::map<std::string, std::shared_ptr<FitnessFunction>> &fitness_functions);
+cxxopts::ParseResult parseOptions(int argc, char *argv[]);
 void printHelp(const cxxopts::Options &options);
 SwarmUsage getSwarmUsage(const std::string &option);
 
-RunResult run(size_t ndim, const std::shared_ptr<FitnessFunction> &fitness_function, SwarmUsage swarm_usage, double b_coef_opt, double d_coef_mult);
+RunResult run(
+    size_t thread_index,
+    size_t ndim,
+    const std::shared_ptr<FitnessFunction> &fitness_function,
+    size_t num_agents,
+    size_t num_agents_for_exchange,
+    SwarmUsage swarm_usage,
+    double b_coef_opt,
+    double d_coef_mult,
+    bool disable_almost_acceptable
+);
+
 void swarmsExchange(
     const std::shared_ptr<ChickenSwarm> &chicken_swarm,
     const std::shared_ptr<FishSwarm> &fish_swarm,
@@ -90,9 +103,15 @@ void swarmsExchange(
 );
 
 void saveResultX(const std::vector<RunResult> &run_results, bool best);
-void printRunStatistics(const std::vector<RunResult> &run_results);
+
+// Statistics
+void printRunStatistics(const std::vector<RunResult> &run_results, const std::shared_ptr<FitnessFunction> &fitness_function);
+Eigen::VectorXd calculateVariances(const std::vector<Eigen::VectorXd>& points);
+
 void draw2DGraphic(const std::vector<RunResult> &run_results, const std::shared_ptr<FitnessFunction> &fitness_function, bool best);
-void drawStagnation(const std::vector<RunResult> &run_results);
+void drawStagnationGraphic(const std::vector<RunResult> &run_results);
+void printProgress(int percent);
+void print_progress_ncurses(int thread_index, int percent);
 
 
 std::map<std::string, std::shared_ptr<FitnessFunction>> initFitnessFunctions(size_t ndim)
@@ -102,29 +121,30 @@ std::map<std::string, std::shared_ptr<FitnessFunction>> initFitnessFunctions(siz
         std::pair<std::string, std::shared_ptr<FitnessFunction>>("alpine_2", std::make_shared<fitness_function::Alpine2>(ndim)),
         std::pair<std::string, std::shared_ptr<FitnessFunction>>("deflected_corrugated_spring", std::make_shared<fitness_function::DeflectedCorrugatedSpring>(ndim)),
         std::pair<std::string, std::shared_ptr<FitnessFunction>>("rastrigin", std::make_shared<fitness_function::Rastrigin>(ndim)),
-        std::pair<std::string, std::shared_ptr<FitnessFunction>>("spherical", std::make_shared<fitness_function::Spherical>(ndim))
+        std::pair<std::string, std::shared_ptr<FitnessFunction>>("spherical", std::make_shared<fitness_function::Spherical>(ndim)),
+        std::pair<std::string, std::shared_ptr<FitnessFunction>>("main_task", std::make_shared<fitness_function::MainTask>(ndim))
     };
 }
 
 
-cxxopts::ParseResult parseOptions(cxxopts::Options &options, int argc, char *argv[], const std::map<std::string, std::shared_ptr<FitnessFunction>> &fitness_functions)
+cxxopts::ParseResult parseOptions(cxxopts::Options &options, int argc, char *argv[])
 {
-    std::string fitness_help = "\t\tAvailable fitness functions: ";
-    for (const auto& key : fitness_functions)
-    {
-        fitness_help += key.first + ", ";
-    }
+    std::string fitness_help = "\t\tAvailable fitness functions: main_task (default), spherical, alpine_1, alpine_2, deflected_corrugated_spring, rastrigin";
 
     std::string swarms_help = "\t\tAvailable swarms usage: chicken, fish, both";
 
     options.add_options()
-        ("f,fitness", "Fitness function", cxxopts::value<std::string>()->default_value("spherical"), fitness_help)
+        ("d,dim", "Task dimension", cxxopts::value<size_t>()->default_value("2"))
+        ("f,fitness", "Fitness function", cxxopts::value<std::string>()->default_value("main_task"), fitness_help)
+        ("a,num-agents", "Number of agents", cxxopts::value<size_t>()->default_value("50"))
+        ("e,num-agents-for-exchange", "Disable almost acceptable", cxxopts::value<size_t>()->default_value("1"))
         ("t,multistart-threads", "Number of parallel threads", cxxopts::value<int>()->default_value("1"))
         ("n,number-starts", "Number of starts", cxxopts::value<int>()->default_value("1"))
         ("b,best", "Write only best agent of each multistart", cxxopts::value<bool>()->default_value("true"))
         ("s,swarms", "Swarm usage", cxxopts::value<std::string>()->default_value("chicken"))
         ("b-coef", "b-coef", cxxopts::value<double>()->default_value("1.0"))
         ("d-coef-mult", "d-coef multiplier", cxxopts::value<double>()->default_value("1.0"))
+        ("disable-almost-acceptable", "Disable almost acceptable", cxxopts::value<bool>()->default_value("false"))
         ("h,help", "Print usage")
         ;
 
@@ -151,15 +171,11 @@ SwarmUsage getSwarmUsage(const std::string &option)
 int main(int argc, char *argv[]) {
     srand(time(nullptr));
 
-    // Подготовка
-    size_t ndim = 2;
-    std::map<std::string, std::shared_ptr<FitnessFunction>> fitness_functions = initFitnessFunctions(ndim);
-
     cxxopts::Options options("ADPCCSO_optimization", "Improved chicken swarm optimization method");
     cxxopts::ParseResult opt_parse_res;
     try
     {
-        opt_parse_res = parseOptions(options, argc, argv, fitness_functions);
+        opt_parse_res = parseOptions(options, argc, argv);
         if (opt_parse_res.count("help"))
         {
             printHelp(options);
@@ -170,6 +186,10 @@ int main(int argc, char *argv[]) {
         printHelp(options);
     }
 
+    // Подготовка
+    size_t ndim = opt_parse_res["dim"].as<size_t>();
+    std::map<std::string, std::shared_ptr<FitnessFunction>> fitness_functions = initFitnessFunctions(ndim);
+
     auto fitness_function = fitness_functions[opt_parse_res["fitness"].as<std::string>()];
     auto swarm_usage = getSwarmUsage(opt_parse_res["swarms"].as<std::string>());
 
@@ -178,11 +198,20 @@ int main(int argc, char *argv[]) {
     std::vector<RunResult> run_results;
     std::mutex run_mtx;
 
-    auto thread_task = [&]()
+    auto thread_task = [&](size_t thread_index)
     {
         try
         {
-            auto cur_res = run(ndim, fitness_function, swarm_usage, opt_parse_res["b-coef"].as<double>(), opt_parse_res["d-coef-mult"].as<double>());
+            auto cur_res = run(
+                thread_index,
+                ndim,
+                fitness_function,
+                opt_parse_res["num-agents"].as<size_t>(),
+                opt_parse_res["num-agents-for-exchange"].as<size_t>(),
+                swarm_usage, opt_parse_res["b-coef"].as<double>(),
+                opt_parse_res["d-coef-mult"].as<double>(),
+                opt_parse_res["disable-almost-acceptable"].as<bool>()
+            );
 
             // Запись результатов
             std::lock_guard<std::mutex> lock(run_mtx);
@@ -190,7 +219,7 @@ int main(int argc, char *argv[]) {
         }
         catch(const std::exception& e)
         {
-            std::cerr << e.what() << '\n';
+            std::cerr << "\n" << e.what() << '\n';
         }
     };
 
@@ -209,7 +238,7 @@ int main(int argc, char *argv[]) {
 
         // Запускаем задачи до достижения лимита одновременных потоков
         while (current_threads < num_threads && task_count < num_tasks) {
-            futures.push_back(std::async(std::launch::async, thread_task));
+            futures.push_back(std::async(std::launch::async, thread_task, current_threads));
             task_count++;
             current_threads++;
         }
@@ -228,21 +257,37 @@ int main(int argc, char *argv[]) {
     std::cout << std::endl << "Total execution time: " << duration.count() / 1000.0 << " seconds" << std::endl;
 
     bool best = opt_parse_res["best"].as<bool>();
-    saveResultX(run_results, best);
-    printRunStatistics(run_results);
-    if (ndim == 2) draw2DGraphic(run_results, fitness_function, best);
+    if (run_results.size() > 0)
+    {
+        saveResultX(run_results, best);
+        printRunStatistics(run_results, fitness_function);
+        drawStagnationGraphic(run_results);
+        if (ndim == 2) draw2DGraphic(run_results, fitness_function, best);
+    }
+    else
+    {
+        std::cerr << "No results available!\n";
+    }
 
     return 0;
 }
 
 
-RunResult run(size_t ndim, const std::shared_ptr<FitnessFunction> &fitness_function, SwarmUsage swarm_usage, double b_coef_opt, double d_coef_mult)
+RunResult run(
+    size_t thread_index,
+    size_t ndim,
+    const std::shared_ptr<FitnessFunction> &fitness_function,
+    size_t num_agents,
+    size_t num_agents_for_exchange,
+    SwarmUsage swarm_usage,
+    double b_coef_opt,
+    double d_coef_mult,
+    bool disable_almost_acceptable
+)
 {
     // Общие параметры
-    size_t num_agents = 50;
-    size_t num_agents_for_exchange = 1;
-    size_t num_chicken_agents = swarm_usage == SwarmUsage::BOTH ? 25 : (swarm_usage == SwarmUsage::CHICKEN ? num_agents : 0);
-    size_t num_fish_agents = swarm_usage == SwarmUsage::BOTH ? 25 : (swarm_usage == SwarmUsage::FISH ? num_agents : 0);
+    size_t num_chicken_agents = swarm_usage == SwarmUsage::BOTH ? num_agents / 2 : (swarm_usage == SwarmUsage::CHICKEN ? num_agents : 0);
+    size_t num_fish_agents = swarm_usage == SwarmUsage::BOTH ? num_agents / 2 : (swarm_usage == SwarmUsage::FISH ? num_agents : 0);
     size_t max_gen = 1000;
 
     // Параметры куриного роя
@@ -289,6 +334,9 @@ RunResult run(size_t ndim, const std::shared_ptr<FitnessFunction> &fitness_funct
         fish_swarm->startupAgentsInit(X_fish);
     }
 
+
+    // ------------ Main work cycle begin ------------
+
     // Алгоритм локализации минимума
     auto calc_sync_gen = [](size_t t) -> size_t
     {
@@ -296,6 +344,13 @@ RunResult run(size_t ndim, const std::shared_ptr<FitnessFunction> &fitness_funct
     };
 
     size_t sync_gen = calc_sync_gen(0);
+
+    initscr(); // Инициализация ncurses
+    cbreak(); // Отключаем буферизацию строк
+    noecho(); // Выключаем эхо ввода
+    curs_set(0); // Скрываем курсор
+
+    printw("%s ", "Optimization processing...");
 
     std::vector<double> stagnation;
     for (size_t cur_gen = 1; cur_gen < max_gen; cur_gen++)
@@ -306,30 +361,44 @@ RunResult run(size_t ndim, const std::shared_ptr<FitnessFunction> &fitness_funct
         double fish_best = std::numeric_limits<double>::max();
 
         if ((size_t)swarm_usage & (size_t)SwarmUsage::CHICKEN)
+        {
             chicken_swarm->doMove([&chicken_swarm, cur_gen, sync_gen](size_t i) {
                 return chicken_swarm->getAgents()[i]->calcMove(cur_gen, cur_gen % sync_gen == 0);
             });
             chicken_best = chicken_swarm->getOptimalValue();
+        }
 
         if ((size_t)swarm_usage & (size_t)SwarmUsage::FISH)
+        {
             fish_swarm->doMove([&fish_swarm, cur_gen, sync_gen](size_t i) {
                 return fish_swarm->getAgents()[i]->calcMove(cur_gen, cur_gen % sync_gen == 0);
             });
             fish_best = fish_swarm->getOptimalValue();
+        }
 
         if (swarm_usage == SwarmUsage::BOTH)
+        {
             swarmsExchange(chicken_swarm, fish_swarm, num_agents_for_exchange);
             chicken_best = chicken_swarm->getOptimalValue();
             fish_best = fish_swarm->getOptimalValue();
+        }
 
         if ((size_t)swarm_usage & (size_t)SwarmUsage::CHICKEN)
+        {
             if (cur_gen % sync_gen == 0)
             {
                 chicken_swarm->updateAgentsRoles();
             }
+        }
 
         stagnation.push_back(std::min(chicken_best, fish_best));
+
+        print_progress_ncurses(thread_index, (double)cur_gen / max_gen * 100);
     }
+
+    endwin(); // Завершить работу с ncurses
+
+    // ------------ Main work cycle end ------------
 
     constexpr bool print_verbose = true;
     if ((size_t)swarm_usage & (size_t)SwarmUsage::CHICKEN) chicken_swarm->printData(print_verbose);
@@ -357,6 +426,12 @@ RunResult run(size_t ndim, const std::shared_ptr<FitnessFunction> &fitness_funct
             all_fitness_vals.push_back(agent->getCachedFitnessValue());
             agent_classes.push_back(agent->getAgentClass());
         }
+    }
+
+    if (disable_almost_acceptable)
+    {
+        agent_classes.clear();
+        agent_classes = Swarm<ChickenSwarm>::calcAgentClasses(fitness_function, all_X);
     }
 
     if (swarm_usage == SwarmUsage::BOTH)
@@ -481,20 +556,113 @@ void saveResultX(const std::vector<RunResult> &run_results, bool best)
 }
 
 
-void printRunStatistics(const std::vector<RunResult> &run_results)
+void printRunStatistics(const std::vector<RunResult> &run_results, const std::shared_ptr<FitnessFunction> &fitness_function)
 {
     std::cout << "\nRun statistics:\n";
     double sum = 0;
 
-    std::cout << "Points groups (acceptable - 0, almost_acceptable - 1, unacceptable - 2):\n[ ";
-    for (auto& run_res : run_results)
+    std::cout << "Points groups (acceptable - 0, almost_acceptable - 1, unacceptable - 2):\n";
+    for (int i = 0; i < run_results.size(); i++)
     {
-        for (auto& ac : run_res.agent_classes)
+        std::cout << "Start [" << i + 1 << "]: " << "[ ";
+        for (auto& ac : run_results[i].agent_classes)
         {
             std::cout << (int)ac << " ";
         }
+        std::cout << "]\n";
     }
-    std::cout << "]\n";
+
+    std::cout << std::endl;
+
+    // Критерии
+    std::vector<Eigen::VectorXd> acc_X;
+    std::vector<Eigen::VectorXd> alm_acc_X;
+    std::vector<double> acceptable_per_res;
+    std::vector<double> almost_acceptable_per_res;
+
+    double V = fitness_function->volume();
+    std::cout << "Acceptable set volume: " << V << std::endl;
+
+    double average_acceptable = 0;
+    double average_almost_acceptable = 0;
+    for (int i = 0; i < run_results.size(); i++)
+    {
+        acceptable_per_res.push_back(0);
+        almost_acceptable_per_res.push_back(0);
+
+        for (int j = 0; j < run_results[i].agent_classes.size(); j++)
+        {
+            if (run_results[i].agent_classes[j] == AgentClass::ACCEPTABLE)
+            {
+                average_acceptable++;
+                acceptable_per_res[i]++;
+                acc_X.push_back(run_results[i].all_X[j]);
+            }
+            if (run_results[i].agent_classes[j] == AgentClass::ALMOST_ACCEPTABLE)
+            {
+                average_almost_acceptable++;
+                almost_acceptable_per_res[i]++;
+                alm_acc_X.push_back(run_results[i].all_X[j]);
+            }
+        }
+
+        acceptable_per_res[i] /= V;
+        almost_acceptable_per_res[i] /= V;
+    }
+    average_acceptable /= run_results.size();
+    average_almost_acceptable /= run_results.size();
+
+    double norm_by_V_acc = average_acceptable / V;
+    double norm_by_V_alm_acc = average_almost_acceptable / V;
+
+    double mean_acc = 0;
+    double mean_alm_acc = 0;
+    for (int i = 0; i < run_results.size(); i++)
+    {
+        mean_acc += pow(acceptable_per_res[i] - average_acceptable, 2);
+        mean_alm_acc += pow(almost_acceptable_per_res[i] - average_almost_acceptable, 2);
+    }
+    mean_acc = sqrt(mean_acc / run_results.size());
+    mean_alm_acc = sqrt(mean_alm_acc / run_results.size());
+
+    Eigen::VectorXd var_acc = calculateVariances(acc_X);
+    Eigen::VectorXd var_alm_acc = calculateVariances(alm_acc_X);
+
+    double diverse_acc = var_acc.lpNorm<Eigen::Infinity>();
+    double diverse_alm_acc = var_alm_acc.lpNorm<Eigen::Infinity>();
+
+    std::cout << "(A) Normalized count of acceptable points: " << norm_by_V_acc << std::endl;
+    std::cout << "(B) Mean of normalized count of acceptable points: " << mean_acc << std::endl;
+    std::cout << "(C) Normalized count of almost acceptable points: " << norm_by_V_alm_acc << std::endl;
+    std::cout << "(D) Mean of normalized count of almost acceptable points: " << mean_alm_acc << std::endl;
+    std::cout << "(E) Diversity of acceptable set: " << diverse_acc << std::endl;
+    std::cout << "( ) Diversity of almost acceptable set: " << diverse_alm_acc << std::endl;
+}
+
+
+Eigen::VectorXd calculateVariances(const std::vector<Eigen::VectorXd>& points)
+{
+    if (points.empty()) return Eigen::VectorXd();
+
+    int dimensions = points.front().size();
+    Eigen::VectorXd mean = Eigen::VectorXd::Zero(dimensions);
+    Eigen::VectorXd variances = Eigen::VectorXd::Zero(dimensions);
+    int n = points.size();
+
+    // Вычисляем среднее
+    for (const auto& point : points) {
+        mean += point;
+    }
+    mean /= n;
+
+    // Вычисляем дисперсию
+    for (const auto& point : points) {
+        Eigen::VectorXd diff = point - mean;
+        variances += diff.cwiseProduct(diff);
+    }
+    variances /= n;
+
+    return variances;
 }
 
 
@@ -599,7 +767,11 @@ void drawStagnationGraphic(const std::vector<RunResult> &run_results)
         data_file << i << " ";
         for (int j = 0; j < stagnation[i].size(); j++)
         {
-            data_file << stagnation[i][j] << " ";
+            data_file << stagnation[i][j];
+            if (j < run_results.size() - 1)
+            {
+                data_file << " ";
+            }
         }
         data_file << std::endl;
     }
@@ -609,8 +781,62 @@ void drawStagnationGraphic(const std::vector<RunResult> &run_results)
     script_file << "plot ";
     for (int i = 0; i < run_results.size(); i++)
     {
-        script_file << "stagnation.dat using 1:" << i + 2 << " with lines, \\\n";
+        script_file << "'stagnation.dat' using 1:" << i + 2 << " with lines title 'Start [" << i + 1 << "]'";
+        if (i < run_results.size() - 1)
+        {
+            script_file << ", \\";
+        }
+        script_file << "\n";
     }
     script_file << "pause -1\n";
     script_file.close();
+}
+
+
+void printProgress(int percent)
+{
+    int total = 50; // Длина полосы загрузки
+    int filled = percent * total / 100;
+
+    // Строим полосу загрузки
+    std::string bar;
+    for (int i = 0; i < filled; ++i) {
+        bar += "=";
+    }
+    bar += '>';
+    for (int i = filled + 1; i < total; ++i) {
+        bar += " ";
+    }
+
+    // Очищаем текущую строку
+    std::cout << "\r"; // Возврат каретки в начало строки
+    std::cout << "[" << bar << "] " << percent << "%" << std::flush;
+}
+
+
+void print_progress_ncurses(int thread_index, int percent) {
+    static std::mutex _mutex;
+    std::lock_guard<std::mutex> lg(_mutex);
+
+    int total = 50; // Длина полосы загрузки
+    int filled = percent * total / 100;
+
+    // Перемещаем курсор на соответствующую строку
+    move(thread_index + 1, 0); // Переместить курсор на начало указанной строки
+    clrtoeol(); // Очистить строку
+
+    // Печатаем полосу загрузки
+    printw("[");
+    for (int i = 0; i < filled; ++i) {
+        addch('=');
+    }
+    if (filled < total) {
+        addch('>');
+    }
+    for (int i = filled + 1; i < total; ++i) {
+        addch(' ');
+    }
+    printw("] %d%%", percent);
+
+    refresh(); // Обновить вывод на экране
 }

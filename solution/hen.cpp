@@ -12,7 +12,7 @@ double Hen::calcC1(const std::shared_ptr<Rootster> &group_rootster, const std::v
 {
     double f_i = this->getCachedFitnessValue();
     double f_r1 = group_rootster->getCachedFitnessValue();
-    // if (f_i < f_r1) std::swap(f_i, f_r1);
+    if (f_i < f_r1) std::swap(f_i, f_r1);
 
     return exp((f_i - f_r1) / (fabs(f_i) + std::numeric_limits<double>::min()));
 }
@@ -22,7 +22,7 @@ double Hen::calcC2(const std::shared_ptr<Agent> &random_chicken, const std::vect
 {
     double f_i = this->getCachedFitnessValue();
     double f_r2 = random_chicken->getCachedFitnessValue();
-    // if (f_i < f_r2) std::swap(f_i, f_r2);
+    if (f_i < f_r2) std::swap(f_i, f_r2);
 
     //std::cout << "f_i: " << f_i << " f_r2: " << f_r2 << std::endl;
 

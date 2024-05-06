@@ -28,6 +28,7 @@ public:
     virtual double fitness(const Eigen::VectorXd &X) = 0;
     virtual Hypercube getBoundHypercube() = 0;
     virtual bool acceptable(const Eigen::VectorXd &X);
+    virtual double volume();
 
     double calc(size_t index_in_model, const std::vector<std::shared_ptr<Agent>>& agents);
     double calc(Eigen::VectorXd X, size_t index_in_model, const std::vector<std::shared_ptr<Agent>>& agents);

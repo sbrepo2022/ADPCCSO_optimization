@@ -5,6 +5,9 @@ project(ADPCCSO_optimization)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+set(CMAKE_BUILD_TYPE Debug) # Тип сборки в Debug
+add_definitions(-g -O0) # Флаги
+
 # Добавляем исходные файлы
 add_executable(
     ${PROJECT_NAME}
@@ -36,6 +39,8 @@ add_executable(
     solution/fitness_functions/rastrigin.h
     solution/fitness_functions/spherical.cpp
     solution/fitness_functions/spherical.h
+    solution/fitness_functions/main_task.cpp
+    solution/fitness_functions/main_task.h
     solution/helpers.cpp
     solution/helpers.h
     solution/hen.cpp
@@ -49,11 +54,15 @@ add_executable(
     solution/swarm.h
 )
 
-target_include_directories(${PROJECT_NAME} PUBLIC "./libs")
-target_include_directories(${PROJECT_NAME} PUBLIC "./solution")
+target_include_directories(${PROJECT_NAME} PRIVATE "./libs")
+target_include_directories(${PROJECT_NAME} PRIVATE "./solution")
 
-# Ищем библиотеку GSL
+# Ищем библиотеки
+find_package(Curses REQUIRED)
 find_package(GSL REQUIRED)
 
-# Связываем наш проект с библиотекой GSL
-target_link_libraries(${PROJECT_NAME} GSL::gsl GSL::gslcblas)
+# Включение директорий заголовочных файлов
+target_include_directories(${PROJECT_NAME} PRIVATE ${CURSES_INCLUDE_DIR})
+
+# Связываем проект с библиотеками
+target_link_libraries(${PROJECT_NAME} GSL::gsl GSL::gslcblas ${CURSES_LIBRARIES})

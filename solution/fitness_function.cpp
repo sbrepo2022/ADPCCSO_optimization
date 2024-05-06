@@ -10,6 +10,12 @@ bool FitnessFunction::acceptable(const Eigen::VectorXd &X)
 }
 
 
+double FitnessFunction::volume()
+{
+    return 1;
+}
+
+
 double FitnessFunction::calc(size_t index_in_model, const std::vector<std::shared_ptr<Agent>>& agents)
 {
     double sum = this->fitness(agents[index_in_model]->getX());

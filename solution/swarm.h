@@ -66,14 +66,16 @@ public:
         optimal_value = std::numeric_limits<double>::max();
     }
 
+
     virtual ~Swarm() {}
 
-    void startupAgentsInit(const std::vector<Eigen::VectorXd> &X)
+
+    static std::vector<AgentClass> calcAgentClasses(const std::shared_ptr<FitnessFunction> &fitness_function, const std::vector<Eigen::VectorXd> &X)
     {
         std::vector<AgentClass> agent_classes;
         for (auto& x: X)
         {
-            if (this->fitness_function->acceptable(x))
+            if (fitness_function->acceptable(x))
             {
                 agent_classes.push_back(AgentClass::ACCEPTABLE);
             }
@@ -82,7 +84,13 @@ public:
                 agent_classes.push_back(AgentClass::UNACCEPTABLE);
             }
         }
+        return agent_classes;
+    }
 
+
+    void startupAgentsInit(const std::vector<Eigen::VectorXd> &X)
+    {
+        auto agent_classes = calcAgentClasses(this->fitness_function, X);
         this->initAgents(X, agent_classes);
     }
 
