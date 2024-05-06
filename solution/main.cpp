@@ -36,7 +36,8 @@ struct RunResult
         const std::vector<double> &all_fitness_vals,
         const std::vector<AgentClass> &agent_classes,
         const Eigen::VectorXd &best_X,
-        double best_fitness_val
+        double best_fitness_val,
+        const std::vector<double> &stagnation
     )
         : limits(limits)
         , all_X(all_X)
@@ -44,6 +45,7 @@ struct RunResult
         , agent_classes(agent_classes)
         , best_X(best_X)
         , best_fitness_val(best_fitness_val)
+        , stagnation(stagnation)
         {}
 
     Hypercube limits;
@@ -54,6 +56,8 @@ struct RunResult
 
     Eigen::VectorXd best_X;
     double best_fitness_val;
+
+    std::vector<double> stagnation;
 };
 
 
@@ -88,6 +92,7 @@ void swarmsExchange(
 void saveResultX(const std::vector<RunResult> &run_results, bool best);
 void printRunStatistics(const std::vector<RunResult> &run_results);
 void draw2DGraphic(const std::vector<RunResult> &run_results, const std::shared_ptr<FitnessFunction> &fitness_function, bool best);
+void drawStagnation(const std::vector<RunResult> &run_results);
 
 
 std::map<std::string, std::shared_ptr<FitnessFunction>> initFitnessFunctions(size_t ndim)
@@ -292,28 +297,38 @@ RunResult run(size_t ndim, const std::shared_ptr<FitnessFunction> &fitness_funct
 
     size_t sync_gen = calc_sync_gen(0);
 
+    std::vector<double> stagnation;
     for (size_t cur_gen = 1; cur_gen < max_gen; cur_gen++)
     {
         sync_gen = calc_sync_gen(cur_gen);
+
+        double chicken_best = std::numeric_limits<double>::max();
+        double fish_best = std::numeric_limits<double>::max();
 
         if ((size_t)swarm_usage & (size_t)SwarmUsage::CHICKEN)
             chicken_swarm->doMove([&chicken_swarm, cur_gen, sync_gen](size_t i) {
                 return chicken_swarm->getAgents()[i]->calcMove(cur_gen, cur_gen % sync_gen == 0);
             });
+            chicken_best = chicken_swarm->getOptimalValue();
 
         if ((size_t)swarm_usage & (size_t)SwarmUsage::FISH)
             fish_swarm->doMove([&fish_swarm, cur_gen, sync_gen](size_t i) {
                 return fish_swarm->getAgents()[i]->calcMove(cur_gen, cur_gen % sync_gen == 0);
             });
+            fish_best = fish_swarm->getOptimalValue();
 
         if (swarm_usage == SwarmUsage::BOTH)
             swarmsExchange(chicken_swarm, fish_swarm, num_agents_for_exchange);
+            chicken_best = chicken_swarm->getOptimalValue();
+            fish_best = fish_swarm->getOptimalValue();
 
         if ((size_t)swarm_usage & (size_t)SwarmUsage::CHICKEN)
             if (cur_gen % sync_gen == 0)
             {
                 chicken_swarm->updateAgentsRoles();
             }
+
+        stagnation.push_back(std::min(chicken_best, fish_best));
     }
 
     constexpr bool print_verbose = true;
@@ -347,13 +362,13 @@ RunResult run(size_t ndim, const std::shared_ptr<FitnessFunction> &fitness_funct
     if (swarm_usage == SwarmUsage::BOTH)
     {
         if (chicken_swarm->getOptimalValue() < fish_swarm->getOptimalValue())
-            return RunResult(hypercube, all_X, all_fitness_vals, agent_classes, chicken_swarm->getOptimalX(), chicken_swarm->getOptimalValue());
+            return RunResult(hypercube, all_X, all_fitness_vals, agent_classes, chicken_swarm->getOptimalX(), chicken_swarm->getOptimalValue(), stagnation);
         else
-            return RunResult(hypercube, all_X, all_fitness_vals, agent_classes, fish_swarm->getOptimalX(), fish_swarm->getOptimalValue());
+            return RunResult(hypercube, all_X, all_fitness_vals, agent_classes, fish_swarm->getOptimalX(), fish_swarm->getOptimalValue(), stagnation);
     }
-    else if (swarm_usage == SwarmUsage::CHICKEN) return RunResult(hypercube, all_X, all_fitness_vals, agent_classes, chicken_swarm->getOptimalX(), chicken_swarm->getOptimalValue());
-    else if (swarm_usage == SwarmUsage::FISH) return RunResult(hypercube, all_X, all_fitness_vals, agent_classes, fish_swarm->getOptimalX(), fish_swarm->getOptimalValue());
-    else return RunResult(hypercube, {}, {}, {}, Eigen::VectorXd::Zero(ndim), 0.0);
+    else if (swarm_usage == SwarmUsage::CHICKEN) return RunResult(hypercube, all_X, all_fitness_vals, agent_classes, chicken_swarm->getOptimalX(), chicken_swarm->getOptimalValue(), stagnation);
+    else if (swarm_usage == SwarmUsage::FISH) return RunResult(hypercube, all_X, all_fitness_vals, agent_classes, fish_swarm->getOptimalX(), fish_swarm->getOptimalValue(), stagnation);
+    else return RunResult(hypercube, {}, {}, {}, Eigen::VectorXd::Zero(ndim), 0.0, {});
 }
 
 
@@ -468,16 +483,18 @@ void saveResultX(const std::vector<RunResult> &run_results, bool best)
 
 void printRunStatistics(const std::vector<RunResult> &run_results)
 {
+    std::cout << "\nRun statistics:\n";
     double sum = 0;
 
+    std::cout << "Points groups (acceptable - 0, almost_acceptable - 1, unacceptable - 2):\n[ ";
     for (auto& run_res : run_results)
     {
         for (auto& ac : run_res.agent_classes)
         {
-            std::cout << (int)ac;
+            std::cout << (int)ac << " ";
         }
     }
-    std::cout << std::endl;
+    std::cout << "]\n";
 }
 
 
@@ -555,4 +572,45 @@ void draw2DGraphic(const std::vector<RunResult> &run_results, const std::shared_
 
     createGraphFile(GraphMode::DRAW_2D);
     createGraphFile(GraphMode::DRAW_3D);
+}
+
+
+void drawStagnationGraphic(const std::vector<RunResult> &run_results)
+{
+    std::vector<std::vector<double>> stagnation;
+
+    bool continue_filling = true;
+    int gen_i = 1;
+    while (continue_filling)
+    {
+        std::vector<double> stagnation_row;
+        for (const auto& run_res : run_results) {
+            if (run_res.stagnation.size() - 1 == gen_i) continue_filling = false;
+
+            stagnation_row.push_back(run_res.stagnation[gen_i]);
+        }
+        stagnation.push_back(stagnation_row);
+        gen_i++;
+    }
+
+    std::ofstream data_file("stagnation.dat");
+    for (int i = 0; i < stagnation.size(); i++)
+    {
+        data_file << i << " ";
+        for (int j = 0; j < stagnation[i].size(); j++)
+        {
+            data_file << stagnation[i][j] << " ";
+        }
+        data_file << std::endl;
+    }
+    data_file.close();
+
+    std::ofstream script_file("plot_script_stagnation.gp");
+    script_file << "plot ";
+    for (int i = 0; i < run_results.size(); i++)
+    {
+        script_file << "stagnation.dat using 1:" << i + 2 << " with lines, \\\n";
+    }
+    script_file << "pause -1\n";
+    script_file.close();
 }
