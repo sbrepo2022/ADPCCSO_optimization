@@ -20,7 +20,7 @@ public:
     double fitness(const Eigen::VectorXd &X) override;
     Hypercube getBoundHypercube() override;
     bool acceptable(const Eigen::VectorXd &X) override;
-    double volume();
+    double volume() override;
 };
 
 }

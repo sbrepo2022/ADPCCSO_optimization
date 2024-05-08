@@ -93,6 +93,7 @@ RunResult run(
     SwarmUsage swarm_usage,
     double b_coef_opt,
     double d_coef_mult,
+    size_t g_parameter,
     bool disable_almost_acceptable
 );
 
@@ -137,13 +138,14 @@ cxxopts::ParseResult parseOptions(cxxopts::Options &options, int argc, char *arg
         ("d,dim", "Task dimension", cxxopts::value<size_t>()->default_value("2"))
         ("f,fitness", "Fitness function", cxxopts::value<std::string>()->default_value("main_task"), fitness_help)
         ("a,num-agents", "Number of agents", cxxopts::value<size_t>()->default_value("50"))
-        ("e,num-agents-for-exchange", "Disable almost acceptable", cxxopts::value<size_t>()->default_value("1"))
+        ("e,num-agents-for-exchange", "Number agents for exchange (for --swarm=both)", cxxopts::value<size_t>()->default_value("1"))
         ("t,multistart-threads", "Number of parallel threads", cxxopts::value<int>()->default_value("1"))
         ("n,number-starts", "Number of starts", cxxopts::value<int>()->default_value("1"))
         ("b,best", "Write only best agent of each multistart", cxxopts::value<bool>()->default_value("true"))
         ("s,swarms", "Swarm usage", cxxopts::value<std::string>()->default_value("chicken"))
         ("b-coef", "b-coef", cxxopts::value<double>()->default_value("1.0"))
         ("d-coef-mult", "d-coef multiplier", cxxopts::value<double>()->default_value("1.0"))
+        ("g, g-parameter", "Number of iterations before reorganise chicken swarm (0 means dynamic)", cxxopts::value<size_t>()->default_value("0"))
         ("disable-almost-acceptable", "Disable almost acceptable", cxxopts::value<bool>()->default_value("false"))
         ("h,help", "Print usage")
         ;
@@ -210,6 +212,7 @@ int main(int argc, char *argv[]) {
                 opt_parse_res["num-agents-for-exchange"].as<size_t>(),
                 swarm_usage, opt_parse_res["b-coef"].as<double>(),
                 opt_parse_res["d-coef-mult"].as<double>(),
+                opt_parse_res["g-parameter"].as<size_t>(),
                 opt_parse_res["disable-almost-acceptable"].as<bool>()
             );
 
@@ -282,6 +285,7 @@ RunResult run(
     SwarmUsage swarm_usage,
     double b_coef_opt,
     double d_coef_mult,
+    size_t g_parameter,
     bool disable_almost_acceptable
 )
 {
@@ -338,12 +342,16 @@ RunResult run(
     // ------------ Main work cycle begin ------------
 
     // Алгоритм локализации минимума
-    auto calc_sync_gen = [](size_t t) -> size_t
+    auto calc_sync_gen = [g_parameter](size_t t) -> size_t
     {
-        return std::round(40 + 60 * (1 + exp(15 - 0.5*t)));
+        if (g_parameter == 0)
+            return std::round(40 + 60 / (1 + exp(15 - 0.5*t)));
+        else
+            return g_parameter;
     };
 
-    size_t sync_gen = calc_sync_gen(0);
+    size_t sync_num = 0;
+    size_t sync_gen = calc_sync_gen(sync_num);
 
     initscr(); // Инициализация ncurses
     cbreak(); // Отключаем буферизацию строк
@@ -355,7 +363,7 @@ RunResult run(
     std::vector<double> stagnation;
     for (size_t cur_gen = 1; cur_gen < max_gen; cur_gen++)
     {
-        sync_gen = calc_sync_gen(cur_gen);
+        sync_gen = calc_sync_gen(sync_num);
 
         double chicken_best = std::numeric_limits<double>::max();
         double fish_best = std::numeric_limits<double>::max();
@@ -388,6 +396,7 @@ RunResult run(
             if (cur_gen % sync_gen == 0)
             {
                 chicken_swarm->updateAgentsRoles();
+                sync_num++;
             }
         }
 
@@ -609,11 +618,8 @@ void printRunStatistics(const std::vector<RunResult> &run_results, const std::sh
         acceptable_per_res[i] /= V;
         almost_acceptable_per_res[i] /= V;
     }
-    average_acceptable /= run_results.size();
-    average_almost_acceptable /= run_results.size();
-
-    double norm_by_V_acc = average_acceptable / V;
-    double norm_by_V_alm_acc = average_almost_acceptable / V;
+    average_acceptable /= run_results.size() * V;
+    average_almost_acceptable /= run_results.size() * V;
 
     double mean_acc = 0;
     double mean_alm_acc = 0;
@@ -631,9 +637,9 @@ void printRunStatistics(const std::vector<RunResult> &run_results, const std::sh
     double diverse_acc = var_acc.lpNorm<Eigen::Infinity>();
     double diverse_alm_acc = var_alm_acc.lpNorm<Eigen::Infinity>();
 
-    std::cout << "(A) Normalized count of acceptable points: " << norm_by_V_acc << std::endl;
+    std::cout << "(A) Normalized count of acceptable points: " << average_acceptable << std::endl;
     std::cout << "(B) Mean of normalized count of acceptable points: " << mean_acc << std::endl;
-    std::cout << "(C) Normalized count of almost acceptable points: " << norm_by_V_alm_acc << std::endl;
+    std::cout << "(C) Normalized count of almost acceptable points: " << average_almost_acceptable << std::endl;
     std::cout << "(D) Mean of normalized count of almost acceptable points: " << mean_alm_acc << std::endl;
     std::cout << "(E) Diversity of acceptable set: " << diverse_acc << std::endl;
     std::cout << "( ) Diversity of almost acceptable set: " << diverse_alm_acc << std::endl;
