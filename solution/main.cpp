@@ -15,9 +15,10 @@
 #include "fitness_functions/alpine_1.h"
 #include "fitness_functions/alpine_2.h"
 #include "fitness_functions/deflected_corrugated_spring.h"
+#include "fitness_functions/high_load.h"
 #include "fitness_functions/rastrigin.h"
 #include "fitness_functions/spherical.h"
-#include "fitness_functions/main_task.h"
+#include "fitness_functions/main_task_sphere.h"
 
 #include "agents_initializer.h"
 #include "chicken_swarm.h"
@@ -78,11 +79,18 @@ enum class SwarmUsage
     BOTH=0x3
 };
 
+enum class ParallelStrategy
+{
+    MULTISTART,
+    SWARM
+};
+
 
 std::map<std::string, std::shared_ptr<FitnessFunction>> initFitnessFunctions();
 cxxopts::ParseResult parseOptions(int argc, char *argv[]);
 void printHelp(const cxxopts::Options &options);
 SwarmUsage getSwarmUsage(const std::string &option);
+ParallelStrategy getParallelStrategy(const std::string &option);
 
 RunResult run(
     size_t thread_index,
@@ -94,7 +102,9 @@ RunResult run(
     double b_coef_opt,
     double d_coef_mult,
     size_t g_parameter,
-    bool disable_almost_acceptable
+    bool disable_almost_acceptable,
+    ParallelStrategy parallel_strategy,
+    size_t num_threads
 );
 
 void swarmsExchange(
@@ -121,25 +131,26 @@ std::map<std::string, std::shared_ptr<FitnessFunction>> initFitnessFunctions(siz
         std::pair<std::string, std::shared_ptr<FitnessFunction>>("alpine_1", std::make_shared<fitness_function::Alpine1>(ndim)),
         std::pair<std::string, std::shared_ptr<FitnessFunction>>("alpine_2", std::make_shared<fitness_function::Alpine2>(ndim)),
         std::pair<std::string, std::shared_ptr<FitnessFunction>>("deflected_corrugated_spring", std::make_shared<fitness_function::DeflectedCorrugatedSpring>(ndim)),
+        std::pair<std::string, std::shared_ptr<FitnessFunction>>("high_load", std::make_shared<fitness_function::HighLoad>(ndim)),
         std::pair<std::string, std::shared_ptr<FitnessFunction>>("rastrigin", std::make_shared<fitness_function::Rastrigin>(ndim)),
         std::pair<std::string, std::shared_ptr<FitnessFunction>>("spherical", std::make_shared<fitness_function::Spherical>(ndim)),
-        std::pair<std::string, std::shared_ptr<FitnessFunction>>("main_task", std::make_shared<fitness_function::MainTask>(ndim))
+        std::pair<std::string, std::shared_ptr<FitnessFunction>>("main_task_sphere", std::make_shared<fitness_function::MainTaskSphere>(ndim))
     };
 }
 
 
 cxxopts::ParseResult parseOptions(cxxopts::Options &options, int argc, char *argv[])
 {
-    std::string fitness_help = "\t\tAvailable fitness functions: main_task (default), spherical, alpine_1, alpine_2, deflected_corrugated_spring, rastrigin";
-
+    std::string fitness_help = "\t\tAvailable fitness functions: main_task_sphere (default), spherical, alpine_1, alpine_2, deflected_corrugated_spring, high_load, rastrigin";
     std::string swarms_help = "\t\tAvailable swarms usage: chicken, fish, both";
+    std::string parallel_strategy_help = "\tAvailable parallel strategies: multistart, swarm";
 
     options.add_options()
         ("d,dim", "Task dimension", cxxopts::value<size_t>()->default_value("2"))
-        ("f,fitness", "Fitness function", cxxopts::value<std::string>()->default_value("main_task"), fitness_help)
+        ("f,fitness", "Fitness function", cxxopts::value<std::string>()->default_value("main_task_sphere"), fitness_help)
         ("a,num-agents", "Number of agents", cxxopts::value<size_t>()->default_value("50"))
         ("e,num-agents-for-exchange", "Number agents for exchange (for --swarm=both)", cxxopts::value<size_t>()->default_value("1"))
-        ("t,multistart-threads", "Number of parallel threads", cxxopts::value<int>()->default_value("1"))
+        ("t,threads", "Number of parallel threads", cxxopts::value<int>()->default_value("1"))
         ("n,number-starts", "Number of starts", cxxopts::value<int>()->default_value("1"))
         ("b,best", "Write only best agent of each multistart", cxxopts::value<bool>()->default_value("true"))
         ("s,swarms", "Swarm usage", cxxopts::value<std::string>()->default_value("chicken"))
@@ -147,6 +158,7 @@ cxxopts::ParseResult parseOptions(cxxopts::Options &options, int argc, char *arg
         ("d-coef-mult", "d-coef multiplier", cxxopts::value<double>()->default_value("1.0"))
         ("g, g-parameter", "Number of iterations before reorganise chicken swarm (0 means dynamic)", cxxopts::value<size_t>()->default_value("0"))
         ("disable-almost-acceptable", "Disable almost acceptable", cxxopts::value<bool>()->default_value("false"))
+        ("parallel-strategy", "Parallel strategy", cxxopts::value<std::string>()->default_value("multistart"), parallel_strategy_help)
         ("h,help", "Print usage")
         ;
 
@@ -167,6 +179,14 @@ SwarmUsage getSwarmUsage(const std::string &option)
     if (option == "fish") return SwarmUsage::FISH;
     if (option == "both") return SwarmUsage::BOTH;
     return SwarmUsage::NONE;
+}
+
+
+ParallelStrategy getParallelStrategy(const std::string &option)
+{
+    if (option == "multistart") return ParallelStrategy::MULTISTART;
+    if (option == "swarm") return ParallelStrategy::SWARM;
+    return ParallelStrategy::MULTISTART;
 }
 
 
@@ -194,7 +214,9 @@ int main(int argc, char *argv[]) {
 
     auto fitness_function = fitness_functions[opt_parse_res["fitness"].as<std::string>()];
     auto swarm_usage = getSwarmUsage(opt_parse_res["swarms"].as<std::string>());
-
+    auto parallel_strategy = getParallelStrategy(opt_parse_res["parallel-strategy"].as<std::string>());
+    const int num_tasks = opt_parse_res["number-starts"].as<int>();
+    const int num_threads = opt_parse_res["threads"].as<int>();
 
     // Рассчеты
     std::vector<RunResult> run_results;
@@ -210,10 +232,13 @@ int main(int argc, char *argv[]) {
                 fitness_function,
                 opt_parse_res["num-agents"].as<size_t>(),
                 opt_parse_res["num-agents-for-exchange"].as<size_t>(),
-                swarm_usage, opt_parse_res["b-coef"].as<double>(),
+                swarm_usage,
+                opt_parse_res["b-coef"].as<double>(),
                 opt_parse_res["d-coef-mult"].as<double>(),
                 opt_parse_res["g-parameter"].as<size_t>(),
-                opt_parse_res["disable-almost-acceptable"].as<bool>()
+                opt_parse_res["disable-almost-acceptable"].as<bool>(),
+                parallel_strategy,
+                num_threads
             );
 
             // Запись результатов
@@ -226,10 +251,6 @@ int main(int argc, char *argv[]) {
         }
     };
 
-
-    const int num_tasks = opt_parse_res["number-starts"].as<int>();
-    const int num_threads = opt_parse_res["multistart-threads"].as<int>();
-
     std::vector<std::future<void>> futures;
     int task_count = 0;
 
@@ -241,13 +262,18 @@ int main(int argc, char *argv[]) {
 
         // Запускаем задачи до достижения лимита одновременных потоков
         while (current_threads < num_threads && task_count < num_tasks) {
-            futures.push_back(std::async(std::launch::async, thread_task, current_threads));
+            futures.push_back(std::async(
+                parallel_strategy == ParallelStrategy::MULTISTART ? std::launch::async : std::launch::deferred,
+                thread_task,
+                current_threads
+            ));
             task_count++;
             current_threads++;
         }
 
         // Ожидаем завершение всех запущенных задач
-        for (auto &fut : futures) {
+        for (auto &fut : futures)
+        {
             fut.get();
         }
 
@@ -286,7 +312,9 @@ RunResult run(
     double b_coef_opt,
     double d_coef_mult,
     size_t g_parameter,
-    bool disable_almost_acceptable
+    bool disable_almost_acceptable,
+    ParallelStrategy parallel_strategy,
+    size_t num_threads
 )
 {
     // Общие параметры
@@ -324,7 +352,8 @@ RunResult run(
             num_chicken_agents - rootsters_coef * num_chicken_agents - hens_coef * num_chicken_agents,
             max_gen,
             learn_factor_min,
-            learn_factor_max
+            learn_factor_max,
+            parallel_strategy == ParallelStrategy::SWARM ? num_threads : 1
         );
         chicken_swarm->startupAgentsInit(X_chicken);
     }
@@ -334,7 +363,12 @@ RunResult run(
     if ((size_t)swarm_usage & (size_t)SwarmUsage::FISH)
     {
         std::vector<Eigen::VectorXd> X_fish = AgentInitializer::hypercubeUniformInitializer(hypercube, num_fish_agents);
-        fish_swarm = std::make_shared<FishSwarm>(fitness_function, fish_step, fish_visual);
+        fish_swarm = std::make_shared<FishSwarm>(
+            fitness_function,
+            fish_step,
+            fish_visual,
+            parallel_strategy == ParallelStrategy::SWARM ? num_threads : 1
+        );
         fish_swarm->startupAgentsInit(X_fish);
     }
 

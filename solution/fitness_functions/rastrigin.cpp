@@ -1,6 +1,5 @@
 #include "fitness_functions/rastrigin.h"
 
-
 namespace fitness_function
 {
 

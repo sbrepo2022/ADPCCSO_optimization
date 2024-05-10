@@ -6,6 +6,8 @@
 #include <limits>
 #include <stdexcept>
 #include <functional>
+#include <future>
+#include <mutex>
 
 #include "fitness_function.h"
 #include "agent_t.h"
@@ -24,6 +26,8 @@ protected:
     double optimal_value;
     size_t optimal_agent_index;
 
+    size_t num_threads;
+
     virtual void initAgents(const std::vector<Eigen::VectorXd> &X, const std::vector<AgentClass> &agent_classes) = 0;
 
 
@@ -31,17 +35,49 @@ protected:
     {
         double best_value = std::numeric_limits<double>::max();
         int best_agent_index = -1;
+        std::vector<double> fitness_values(this->all_agents.size(), std::numeric_limits<double>::max());
+
+        auto thread_task = [this, &fitness_values](size_t start_i, size_t end_i)
+        {
+            for (size_t i = start_i; i < end_i; i++)
+            {
+                fitness_values[i] = this->all_agents[i]->getFitness()->calc(
+                    this->all_agents[i]->getAgentIndex(),
+                    this->generic_agents
+                );
+            }
+        };
+
+        size_t items_per_thread = this->all_agents.size() / this->num_threads;
+        size_t threads_with_inc_items = this->all_agents.size() % this->num_threads;
+
+        std::vector<std::future<void>> futures;
+        size_t last_i = 0;
+        for (size_t t_i = 0; t_i < this->num_threads; t_i++)
+        {
+            size_t next_i = last_i + (t_i < threads_with_inc_items ? items_per_thread + 1 : items_per_thread);
+            futures.push_back(
+                std::async(
+                    this->num_threads > 1 ? std::launch::async : std::launch::deferred,
+                    thread_task,
+                    last_i,
+                    next_i
+                )
+            );
+            last_i = next_i;
+        }
+
+        for (auto& fut : futures)
+        {
+            fut.get();
+        }
+
         for (size_t i = 0; i < this->all_agents.size(); i++)
         {
-            double fitness_value = this->all_agents[i]->getFitness()->calc(
-                this->all_agents[i]->getAgentIndex(),
-                this->generic_agents
-            );
-            //std::cout << "Index [" << i << "], Fitness value: " << fitness_value << " X: " << this->all_agents[i]->getX().transpose() << std::endl;
-            this->all_agents[i]->updateCachedFitnessValue(fitness_value);
-            if (fitness_value < best_value)
+            this->all_agents[i]->updateCachedFitnessValue(fitness_values[i]);
+            if (fitness_values[i] < best_value)
             {
-                best_value = fitness_value;
+                best_value = fitness_values[i];
                 best_agent_index = i;
             }
         }
@@ -59,9 +95,10 @@ protected:
 
 
 public:
-    Swarm(const std::shared_ptr<FitnessFunction> &fitness_function)
+    Swarm(const std::shared_ptr<FitnessFunction> &fitness_function, size_t  num_threads)
         :
-        fitness_function(fitness_function)
+        fitness_function(fitness_function),
+        num_threads(num_threads)
     {
         optimal_value = std::numeric_limits<double>::max();
     }

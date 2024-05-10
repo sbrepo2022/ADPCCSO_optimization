@@ -20,9 +20,9 @@ private:
     void initAgents(const std::vector<Eigen::VectorXd> &X, const std::vector<AgentClass> &agent_classes);
 
 public:
-    FishSwarm(const std::shared_ptr<FitnessFunction> &fitness_function, double step, double visual)
+    FishSwarm(const std::shared_ptr<FitnessFunction> &fitness_function, double step, double visual, size_t num_threads)
         :
-        Swarm(fitness_function),
+        Swarm(fitness_function, num_threads),
         step(step),
         visual(visual)
     {

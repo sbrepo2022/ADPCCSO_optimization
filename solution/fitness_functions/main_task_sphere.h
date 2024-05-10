@@ -6,13 +6,13 @@
 namespace fitness_function
 {
 
-class MainTask : public FitnessFunction
+class MainTaskSphere : public FitnessFunction
 {
 protected:
     double radius;
 
 public:
-    MainTask(double dim, bool use_shared_function = true, double radius = 2.0)
+    MainTaskSphere(double dim, bool use_shared_function = true, double radius = 2.0)
         : FitnessFunction(dim, use_shared_function),
         radius(radius)
         {}

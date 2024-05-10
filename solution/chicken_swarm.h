@@ -25,6 +25,8 @@ private:
     double learn_factor_min;
     double learn_factor_max;
 
+    size_t num_threads;
+
     std::vector<std::shared_ptr<Rootster>> all_rootsters;
     std::vector<std::shared_ptr<Hen>> all_hens;
     std::vector<std::shared_ptr<Chick>> all_chicks;
@@ -39,10 +41,11 @@ public:
         size_t chicks_number,
         size_t max_iterations,
         double learn_factor_min,
-        double learn_factor_max
+        double learn_factor_max,
+        size_t num_threads
     )
         :
-        Swarm(fitness_function),
+        Swarm(fitness_function, num_threads),
         rootsters_number(rootsters_number),
         hens_number(hens_number),
         chicks_number(chicks_number),

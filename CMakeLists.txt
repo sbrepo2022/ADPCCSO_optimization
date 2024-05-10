@@ -35,12 +35,14 @@ add_executable(
     solution/fitness_functions/alpine_2.h
     solution/fitness_functions/deflected_corrugated_spring.cpp
     solution/fitness_functions/deflected_corrugated_spring.h
+    solution/fitness_functions/high_load.cpp
+    solution/fitness_functions/high_load.h
     solution/fitness_functions/rastrigin.cpp
     solution/fitness_functions/rastrigin.h
     solution/fitness_functions/spherical.cpp
     solution/fitness_functions/spherical.h
-    solution/fitness_functions/main_task.cpp
-    solution/fitness_functions/main_task.h
+    solution/fitness_functions/main_task_sphere.cpp
+    solution/fitness_functions/main_task_sphere.h
     solution/helpers.cpp
     solution/helpers.h
     solution/hen.cpp
@@ -60,6 +62,9 @@ target_include_directories(${PROJECT_NAME} PRIVATE "./solution")
 # Ищем библиотеки
 find_package(Curses REQUIRED)
 find_package(GSL REQUIRED)
+
+# Добавление опций сборки
+target_compile_options(${PROJECT_NAME} PRIVATE)
 
 # Включение директорий заголовочных файлов
 target_include_directories(${PROJECT_NAME} PRIVATE ${CURSES_INCLUDE_DIR})
