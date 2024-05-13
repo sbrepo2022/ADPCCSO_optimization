@@ -41,6 +41,10 @@ add_executable(
     solution/fitness_functions/rastrigin.h
     solution/fitness_functions/spherical.cpp
     solution/fitness_functions/spherical.h
+    solution/fitness_functions/main_task_cube.cpp
+    solution/fitness_functions/main_task_cube.h
+    solution/fitness_functions/main_task_simplex.cpp
+    solution/fitness_functions/main_task_simplex.h
     solution/fitness_functions/main_task_sphere.cpp
     solution/fitness_functions/main_task_sphere.h
     solution/helpers.cpp

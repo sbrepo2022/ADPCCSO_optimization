@@ -7,20 +7,19 @@ namespace fitness_function
 
 double MainTaskSphere::fitness(const Eigen::VectorXd &X)
 {
-    double g1 = 0.0;
+    double g = 0.0;
     for (size_t i = 0; i < X.size(); i++)
     {
-        g1 += pow(X[i], 2) - pow(this->radius, 2);
+        g += pow(X[i], 2) - pow(this->radius, 2);
     }
-
-    double g1_plus = g1 > 0.0 ? g1 : 0.0;
-    return pow(g1_plus, 2);
+    g = g > 0.0 ? g : 0;
+    return pow(g, 2);
 }
 
 
 Hypercube MainTaskSphere::getBoundHypercube()
 {
-    return Hypercube(-Eigen::VectorXd::Ones(this->dim) * this->radius * sqrt(this->dim), 2 * sqrt(this->dim) * this->radius);
+    return Hypercube(-Eigen::VectorXd::Ones(this->dim) * this->radius * sqrt(this->dim) * 1.5, 2 * sqrt(this->dim) * this->radius * 1.5);
 }
 
 

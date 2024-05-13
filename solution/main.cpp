@@ -19,6 +19,8 @@
 #include "fitness_functions/rastrigin.h"
 #include "fitness_functions/spherical.h"
 #include "fitness_functions/main_task_sphere.h"
+#include "fitness_functions/main_task_cube.h"
+#include "fitness_functions/main_task_simplex.h"
 
 #include "agents_initializer.h"
 #include "chicken_swarm.h"
@@ -134,14 +136,16 @@ std::map<std::string, std::shared_ptr<FitnessFunction>> initFitnessFunctions(siz
         std::pair<std::string, std::shared_ptr<FitnessFunction>>("high_load", std::make_shared<fitness_function::HighLoad>(ndim)),
         std::pair<std::string, std::shared_ptr<FitnessFunction>>("rastrigin", std::make_shared<fitness_function::Rastrigin>(ndim)),
         std::pair<std::string, std::shared_ptr<FitnessFunction>>("spherical", std::make_shared<fitness_function::Spherical>(ndim)),
-        std::pair<std::string, std::shared_ptr<FitnessFunction>>("main_task_sphere", std::make_shared<fitness_function::MainTaskSphere>(ndim))
+        std::pair<std::string, std::shared_ptr<FitnessFunction>>("main_task_sphere", std::make_shared<fitness_function::MainTaskSphere>(ndim)),
+        std::pair<std::string, std::shared_ptr<FitnessFunction>>("main_task_cube", std::make_shared<fitness_function::MainTaskCube>(ndim)),
+        std::pair<std::string, std::shared_ptr<FitnessFunction>>("main_task_simplex", std::make_shared<fitness_function::MainTaskSimplex>(ndim))
     };
 }
 
 
 cxxopts::ParseResult parseOptions(cxxopts::Options &options, int argc, char *argv[])
 {
-    std::string fitness_help = "\t\tAvailable fitness functions: main_task_sphere (default), spherical, alpine_1, alpine_2, deflected_corrugated_spring, high_load, rastrigin";
+    std::string fitness_help = "\t\tAvailable fitness functions: main_task_sphere (default), main_task_cube, main_task_simplex, spherical, alpine_1, alpine_2, deflected_corrugated_spring, high_load, rastrigin";
     std::string swarms_help = "\t\tAvailable swarms usage: chicken, fish, both";
     std::string parallel_strategy_help = "\tAvailable parallel strategies: multistart, swarm";
 
