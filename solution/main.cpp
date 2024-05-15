@@ -447,7 +447,7 @@ RunResult run(
 
     // ------------ Main work cycle end ------------
 
-    constexpr bool print_verbose = true;
+    constexpr bool print_verbose = false;
     if ((size_t)swarm_usage & (size_t)SwarmUsage::CHICKEN) chicken_swarm->printData(print_verbose);
     if ((size_t)swarm_usage & (size_t)SwarmUsage::FISH) fish_swarm->printData(print_verbose);
 
@@ -621,7 +621,32 @@ void printRunStatistics(const std::vector<RunResult> &run_results, const std::sh
 
     std::cout << std::endl;
 
-    // Критерии
+    // Базовые критерии
+    Eigen::VectorXd best_X;
+    Eigen::VectorXd avg_X = run_results[0].best_X;
+    double best_fitness_val = std::numeric_limits<double>::max();
+    double avg_fitness_val = 0;
+
+    for (size_t i = 0; i < run_results.size(); i++)
+    {
+        if (run_results[i].best_fitness_val < best_fitness_val)
+        {
+            best_fitness_val = run_results[i].best_fitness_val;
+            best_X = run_results[i].best_X;
+        }
+
+        avg_fitness_val += run_results[i].best_fitness_val;
+        avg_X += run_results[i].best_X;
+    }
+    avg_fitness_val /= run_results.size();
+    avg_X /= run_results.size();
+
+    std::cout << "Best fitness value: " << best_fitness_val << std::endl;
+    std::cout << "Best position accuracy: " << best_X.lpNorm<Eigen::Infinity>() << std::endl;
+    std::cout << "Avg fitness value: " << avg_fitness_val << std::endl;
+    std::cout << "Avg position accuracy: " << avg_X.lpNorm<Eigen::Infinity>() << std::endl;
+
+    // Продвинутые критерии
     std::vector<Eigen::VectorXd> acc_X;
     std::vector<Eigen::VectorXd> alm_acc_X;
     std::vector<double> acceptable_per_res;
