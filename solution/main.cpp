@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <ctime>
 #include <fstream>
+#include <filesystem>
 #include <future>
 #include <mutex>
 #include <chrono>
@@ -37,9 +38,9 @@ struct RunResult
 {
     RunResult(
         Hypercube &limits,
-        const std::vector<Eigen::VectorXd> &all_X,
-        const std::vector<double> &all_fitness_vals,
-        const std::vector<AgentClass> &agent_classes,
+        const std::vector<std::vector<Eigen::VectorXd>> &all_X,
+        const std::vector<std::vector<double>> &all_fitness_vals,
+        const std::vector<std::vector<AgentClass>> &agent_classes,
         const Eigen::VectorXd &best_X,
         double best_fitness_val,
         const std::vector<double> &stagnation
@@ -55,9 +56,9 @@ struct RunResult
 
     Hypercube limits;
 
-    std::vector<Eigen::VectorXd> all_X;
-    std::vector<double> all_fitness_vals;
-    std::vector<AgentClass> agent_classes;
+    std::vector<std::vector<Eigen::VectorXd>> all_X;
+    std::vector<std::vector<double>> all_fitness_vals;
+    std::vector<std::vector<AgentClass>> agent_classes;
 
     Eigen::VectorXd best_X;
     double best_fitness_val;
@@ -115,13 +116,25 @@ void swarmsExchange(
     size_t num_agents_for_exchange
 );
 
-void saveResultX(const std::vector<RunResult> &run_results, bool best);
+template <class SwarmT>
+void writeAgentsPosDataFrame(
+    const std::vector<std::shared_ptr<AgentT<SwarmT>>> &agents,
+    const std::filesystem::path &data_dir,
+    size_t cur_gen
+)
+{
+    std::ofstream ofile(data_dir / ("step_" + std::to_string(cur_gen) + ".dat"));
+    for (auto& agent : agents)
+    {
+        ofile << agent->getX().transpose() << " " << (int)agent->getAgentClass() << std::endl;
+    }
+}
 
 // Statistics
 void printRunStatistics(const std::vector<RunResult> &run_results, const std::shared_ptr<FitnessFunction> &fitness_function);
 Eigen::VectorXd calculateVariances(const std::vector<Eigen::VectorXd>& points);
 
-void draw2DGraphic(const std::vector<RunResult> &run_results, const std::shared_ptr<FitnessFunction> &fitness_function, bool best);
+void draw2DGraphic(const std::vector<RunResult> &run_results, const std::shared_ptr<FitnessFunction> &fitness_function, bool best, size_t num_iterations = 1000);
 void drawStagnationGraphic(const std::vector<RunResult> &run_results);
 void printProgress(int percent);
 void print_progress_ncurses(int thread_index, int percent);
@@ -292,7 +305,6 @@ int main(int argc, char *argv[]) {
     bool best = opt_parse_res["best"].as<bool>();
     if (run_results.size() > 0)
     {
-        saveResultX(run_results, best);
         printRunStatistics(run_results, fitness_function);
         drawStagnationGraphic(run_results);
         if (ndim == 2) draw2DGraphic(run_results, fitness_function, best);
@@ -376,6 +388,13 @@ RunResult run(
         fish_swarm->startupAgentsInit(X_fish);
     }
 
+    // Сохранение файлов с агентами популяции для анимации
+    std::filesystem::path data_dir = std::string("data-") + std::to_string(thread_index);
+    std::filesystem::create_directories(data_dir);
+
+    std::vector<std::vector<Eigen::VectorXd>> all_X;
+    std::vector<std::vector<double>> all_fitness_vals;
+    std::vector<std::vector<AgentClass>> agent_classes;
 
     // ------------ Main work cycle begin ------------
 
@@ -401,6 +420,8 @@ RunResult run(
     std::vector<double> stagnation;
     for (size_t cur_gen = 1; cur_gen < max_gen; cur_gen++)
     {
+        writeAgentsPosDataFrame(chicken_swarm->getAgents(), data_dir, cur_gen);
+
         sync_gen = calc_sync_gen(sync_num);
 
         double chicken_best = std::numeric_limits<double>::max();
@@ -438,9 +459,40 @@ RunResult run(
             }
         }
 
+        print_progress_ncurses(thread_index, (double)cur_gen / max_gen * 100);
+
+        /* Save results of iteration */
         stagnation.push_back(std::min(chicken_best, fish_best));
 
-        print_progress_ncurses(thread_index, (double)cur_gen / max_gen * 100);
+        std::vector<Eigen::VectorXd> all_X_on_iter;
+        std::vector<double> all_fitness_vals_on_iter;
+        std::vector<AgentClass> agent_classes_on_iter;
+
+        if ((size_t)swarm_usage & (size_t)SwarmUsage::CHICKEN)
+        {
+            for (auto& agent : chicken_swarm->getAgents())
+            {
+                all_X_on_iter.push_back(agent->getX());
+                all_fitness_vals_on_iter.push_back(agent->getCachedFitnessValue());
+                agent_classes_on_iter.push_back(agent->getAgentClass());
+            }
+            all_X.push_back(all_X_on_iter);
+            all_fitness_vals.push_back(all_fitness_vals_on_iter);
+            agent_classes.push_back(agent_classes_on_iter);
+        }
+
+        if ((size_t)swarm_usage & (size_t)SwarmUsage::FISH)
+        {
+            for (auto& agent : fish_swarm->getAgents())
+            {
+                all_X_on_iter.push_back(agent->getX());
+                all_fitness_vals_on_iter.push_back(agent->getCachedFitnessValue());
+                agent_classes_on_iter.push_back(agent->getAgentClass());
+            }
+            all_X.push_back(all_X_on_iter);
+            all_fitness_vals.push_back(all_fitness_vals_on_iter);
+            agent_classes.push_back(agent_classes_on_iter);
+        }
     }
 
     endwin(); // Завершить работу с ncurses
@@ -451,35 +503,6 @@ RunResult run(
     if ((size_t)swarm_usage & (size_t)SwarmUsage::CHICKEN) chicken_swarm->printData(print_verbose);
     if ((size_t)swarm_usage & (size_t)SwarmUsage::FISH) fish_swarm->printData(print_verbose);
 
-    std::vector<Eigen::VectorXd> all_X;
-    std::vector<double> all_fitness_vals;
-    std::vector<AgentClass> agent_classes;
-
-    if ((size_t)swarm_usage & (size_t)SwarmUsage::CHICKEN)
-    {
-        for (auto& agent : chicken_swarm->getAgents())
-        {
-            all_X.push_back(agent->getX());
-            all_fitness_vals.push_back(agent->getCachedFitnessValue());
-            agent_classes.push_back(agent->getAgentClass());
-        }
-    }
-
-    if ((size_t)swarm_usage & (size_t)SwarmUsage::FISH)
-    {
-        for (auto& agent : fish_swarm->getAgents())
-        {
-            all_X.push_back(agent->getX());
-            all_fitness_vals.push_back(agent->getCachedFitnessValue());
-            agent_classes.push_back(agent->getAgentClass());
-        }
-    }
-
-    if (disable_almost_acceptable)
-    {
-        agent_classes.clear();
-        agent_classes = Swarm<ChickenSwarm>::calcAgentClasses(fitness_function, all_X);
-    }
 
     if (swarm_usage == SwarmUsage::BOTH)
     {
@@ -555,69 +578,10 @@ void swarmsExchange(
 }
 
 
-void saveResultX(const std::vector<RunResult> &run_results, bool best)
-{
-    std::ofstream ofile;
-    ofile.open("results.csv");
-
-    for (auto& run_res : run_results)
-    {
-        if (best)
-        {
-            for (int j = 0; j < run_res.best_X.size(); j++)
-            {
-                ofile << run_res.best_X[j];
-
-                if (j < run_res.best_X.size() - 1)
-                {
-                    ofile << ",";
-                }
-                else
-                {
-                    ofile << "\n";
-                }
-            }
-        }
-        else
-        {
-            for (int i = 0; i < run_res.all_X.size(); i++)
-            {
-                for (int j = 0; j < run_res.all_X[i].size(); j++)
-                {
-                    if (! run_res.limits.isXIn(run_res.all_X[i])) continue;
-
-                    ofile << run_res.all_X[i][j];
-
-                    if (j < run_res.all_X[i].size() - 1)
-                    {
-                        ofile << ",";
-                    }
-                    else
-                    {
-                        ofile << "\n";
-                    }
-                }
-            }
-        }
-    }
-}
-
-
 void printRunStatistics(const std::vector<RunResult> &run_results, const std::shared_ptr<FitnessFunction> &fitness_function)
 {
     std::cout << "\nRun statistics:\n";
     double sum = 0;
-
-    std::cout << "Points groups (acceptable - 0, almost_acceptable - 1, unacceptable - 2):\n";
-    for (int i = 0; i < run_results.size(); i++)
-    {
-        std::cout << "Start [" << i + 1 << "]: " << "[ ";
-        for (auto& ac : run_results[i].agent_classes)
-        {
-            std::cout << (int)ac << " ";
-        }
-        std::cout << "]\n";
-    }
 
     std::cout << std::endl;
 
@@ -662,19 +626,35 @@ void printRunStatistics(const std::vector<RunResult> &run_results, const std::sh
         acceptable_per_res.push_back(0);
         almost_acceptable_per_res.push_back(0);
 
-        for (int j = 0; j < run_results[i].agent_classes.size(); j++)
+        std::vector<Eigen::VectorXd> all_X;
+        std::vector<double> all_fitness_vals;
+        std::vector<AgentClass> agent_classes;
+
+        for (const auto& vec_X : run_results[i].all_X) {
+            all_X.insert(all_X.end(), vec_X.begin(), vec_X.end());
+        }
+
+        for (const auto& vec_fitness_vals : run_results[i].all_fitness_vals) {
+            all_fitness_vals.insert(all_fitness_vals.end(), vec_fitness_vals.begin(), vec_fitness_vals.end());
+        }
+
+        for (const auto& vec_agent_classes : run_results[i].agent_classes) {
+            agent_classes.insert(agent_classes.end(), vec_agent_classes.begin(), vec_agent_classes.end());
+        }
+
+        for (int j = 0; j < agent_classes.size(); j++)
         {
-            if (run_results[i].agent_classes[j] == AgentClass::ACCEPTABLE)
+            if (agent_classes[j] == AgentClass::ACCEPTABLE)
             {
                 average_acceptable++;
                 acceptable_per_res[i]++;
-                acc_X.push_back(run_results[i].all_X[j]);
+                acc_X.push_back(all_X[j]);
             }
-            if (run_results[i].agent_classes[j] == AgentClass::ALMOST_ACCEPTABLE)
+            if (agent_classes[j] == AgentClass::ALMOST_ACCEPTABLE)
             {
                 average_almost_acceptable++;
                 almost_acceptable_per_res[i]++;
-                alm_acc_X.push_back(run_results[i].all_X[j]);
+                alm_acc_X.push_back(all_X[j]);
             }
         }
 
@@ -735,22 +715,38 @@ Eigen::VectorXd calculateVariances(const std::vector<Eigen::VectorXd>& points)
 }
 
 
-void draw2DGraphic(const std::vector<RunResult> &run_results, const std::shared_ptr<FitnessFunction> &fitness_function, bool best)
+void draw2DGraphic(const std::vector<RunResult> &run_results, const std::shared_ptr<FitnessFunction> &fitness_function, bool best, size_t num_iterations)
 {
     // Сохранение точек в файл
     std::ofstream pointsFile("points.dat");
     for (const auto& run_res : run_results) {
         if (best)
         {
-            pointsFile << run_res.best_X[0] << " " << run_res.best_X[1] << " " << run_res.best_fitness_val << "\n";
+            pointsFile << run_res.best_X[0] << " " << run_res.best_X[1] << " " << run_res.best_fitness_val << " " << 0 << "\n";
         }
         else
         {
-            for (int i = 0; i < run_res.all_X.size(); i++)
+            std::vector<Eigen::VectorXd> all_X;
+            std::vector<double> all_fitness_vals;
+            std::vector<AgentClass> agent_classes;
+
+            for (const auto& vec_X : run_res.all_X) {
+                all_X.insert(all_X.end(), vec_X.begin(), vec_X.end());
+            }
+
+            for (const auto& vec_fitness_vals : run_res.all_fitness_vals) {
+                all_fitness_vals.insert(all_fitness_vals.end(), vec_fitness_vals.begin(), vec_fitness_vals.end());
+            }
+
+            for (const auto& vec_agent_classes : run_res.agent_classes) {
+                agent_classes.insert(agent_classes.end(), vec_agent_classes.begin(), vec_agent_classes.end());
+            }
+
+            for (int i = 0; i < all_X.size(); i++)
             {
-                if (run_res.limits.isXIn(run_res.all_X[i]))
+                if (run_res.limits.isXIn(all_X[i]))
                 {
-                    pointsFile << run_res.all_X[i][0] << " " << run_res.all_X[i][1] << " " << run_res.all_fitness_vals[i] << "\n";
+                    pointsFile << all_X[i][0] << " " << all_X[i][1] << " " << all_fitness_vals[i] << " " << static_cast<size_t>(agent_classes[i]) << "\n";
                 }
             }
         }
@@ -780,35 +776,65 @@ void draw2DGraphic(const std::vector<RunResult> &run_results, const std::shared_
     data_file.close();
 
     // Создание скрипта Gnuplot
-    auto createGraphFile = [](GraphMode graph_mode)
+    auto createGraphFile = [num_iterations, base_x, base_y, side_len](GraphMode graph_mode, bool animated)
     {
         std::ofstream script_file;
-        if (graph_mode == GraphMode::DRAW_2D)
-            script_file.open("plot_script_2d.gp");
+        if (! animated)
+            if (graph_mode == GraphMode::DRAW_2D)
+                script_file.open("plot_script_2d.gp");
+            else
+                script_file.open("plot_script_3d.gp");
         else
-            script_file.open("plot_script_3d.gp");
+            if (graph_mode == GraphMode::DRAW_2D)
+                script_file.open("plot_script_2d_anim.gp");
+            else
+                script_file.open("plot_script_3d_anim.gp");
 
-        if (graph_mode == GraphMode::DRAW_2D)
-            script_file << "set pm3d map\n";
+        if (!animated)
+        {
+            if (graph_mode == GraphMode::DRAW_2D)
+                script_file << "set pm3d map\n";
+            else
+                script_file << "set pm3d\n";
+            script_file << "set palette rgbformulae 33,13,10\n";
+        }
         else
-            script_file << "set pm3d\n";
+        {
+            script_file << "cd workdir\n";
+            script_file << "set terminal gif animate delay 10\n";
+            script_file << "set output 'animation.gif'\n";
+            // script_file << "set style line 1 lc 'red' pt 7 ps 1.5\n";
+            // script_file << "set style line 2 lc 'green' pt 7 ps 1.5\n";
+            // script_file << "set style line 3 lc 'blue' pt 7 ps 1.5\n";
+        }
 
-        script_file << "set palette rgbformulae 33,13,10\n";
-        script_file << "set xlabel 'X[0]'\n";
-        script_file << "set ylabel 'X[1]'\n";
-        script_file << "set title 'Heatmap of the Fitness Function'\n";
+        script_file << "set xlabel 'x_1'\n";
+        script_file << "set ylabel 'x_2'\n";
+        script_file << "set xrange [" << base_x << ":" << base_x + side_len << "]\n";
+        script_file << "set yrange [" << base_y << ":" << base_y + side_len << "]\n";
 
-        if (graph_mode == GraphMode::DRAW_2D)
-            script_file << "splot 'fitness.dat' using 1:2:3 with image, 'points.dat' using 1:2:3 with points pt 7 ps 1.5 lc 'red' title 'Points'\n";
+        if (! animated)
+            if (graph_mode == GraphMode::DRAW_2D)
+                script_file << "splot 'fitness.dat' using 1:2:3 with image notitle, 'points.dat' using 1:2:(($4==0)?2:($4==1)?3:7) with points pt 7 ps 1.5 lc variable notitle\n";
+            else
+                script_file << "splot 'fitness.dat' using 1:2:3 with pm3d notitle, 'points.dat' using 1:2:3:(($4==0)?2:($4==1)?3:7) with points pt 7 ps 1.5 lc variable notitle\n";
         else
-            script_file << "splot 'fitness.dat' using 1:2:3 with pm3d, 'points.dat' using 1:2:3 with points pt 7 ps 1.5 lc 'red' title 'Points'\n";
+        {
+            script_file << "do for [i=1:" << num_iterations - 1 << "] {\n";
+            script_file << "    plot sprintf('step_%d.dat', i) using 1:2:(($3==0)?1:($3==1)?2:3) with points lc variable pt 7 ps 1.5 notitle\n";
+            script_file << "}\n";
+        }
 
-        script_file << "pause -1\n";
+        if (animated)
+            script_file << "set output\n";
+        else
+            script_file << "pause -1\n";
         script_file.close();
     };
 
-    createGraphFile(GraphMode::DRAW_2D);
-    createGraphFile(GraphMode::DRAW_3D);
+    createGraphFile(GraphMode::DRAW_2D, false);
+    createGraphFile(GraphMode::DRAW_3D, false);
+    createGraphFile(GraphMode::DRAW_2D, true);
 }
 
 

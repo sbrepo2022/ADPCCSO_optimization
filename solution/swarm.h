@@ -183,6 +183,10 @@ public:
                 {
                     this->all_agents[i]->updateAgentClass(AgentClass::ALMOST_ACCEPTABLE);
                 }
+                else
+                {
+                    this->all_agents[i]->updateAgentClass(new_class);
+                }
             }
             this->optimal_value = best_value;
             this->optimal_X = best_X;

@@ -1,12 +1,12 @@
 cmake_minimum_required(VERSION 3.0)
 project(ADPCCSO_optimization)
 
-# Устанавливаем стандарт C++ (например, C++17)
-set(CMAKE_CXX_STANDARD 17)
+# Устанавливаем стандарт C++ (например, C++20)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-set(CMAKE_BUILD_TYPE Debug) # Тип сборки в Debug
-add_definitions(-g -O0) # Флаги
+set(CMAKE_BUILD_TYPE Release) # Тип сборки в Debug
+add_definitions(-O3) # Флаги
 
 # Добавляем исходные файлы
 add_executable(
